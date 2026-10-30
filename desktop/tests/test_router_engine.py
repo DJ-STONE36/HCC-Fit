@@ -194,18 +194,31 @@ def case_open_external_fallback():
     import webbrowser
     from PySide6.QtGui import QDesktopServices
     from app import links
+    orig_launch = links._launch_default_browser
     orig_start, orig_qt, orig_wb = os.startfile, QDesktopServices.openUrl, webbrowser.open
+    links._launch_default_browser = lambda _u: (False, "no browser")
     os.startfile = lambda _u: (_ for _ in ()).throw(OSError("blocked"))
     QDesktopServices.openUrl = staticmethod(lambda _u: False)
     webbrowser.open = lambda _u: True
     try:
         ok, how = links.open_external_url("https://example.test/x")
     finally:
+        links._launch_default_browser = orig_launch
         os.startfile = orig_start
         QDesktopServices.openUrl = orig_qt
         webbrowser.open = orig_wb
     assert ok and how == "webbrowser", (ok, how)
-    return "startfile/Qt 失败后仍能打开"
+    return "默认浏览器/startfile/Qt 失败后仍能打开"
+
+
+def case_build_cmdline():
+    from app.links import build_cmdline
+    cmd = r'"C:\Program Files\Edge\msedge.exe" --single-argument %1'
+    got = build_cmdline(cmd, "https://example.test/x")
+    assert got == r'"C:\Program Files\Edge\msedge.exe" --single-argument "https://example.test/x"', got
+    cmd2 = r'"C:\b.exe" "%1"'
+    assert build_cmdline(cmd2, "https://a") == r'"C:\b.exe" "https://a"'
+    return "命令行模板 %1 替换正确"
 
 
 def case_titles_wrap():
@@ -258,6 +271,7 @@ def main():
     check("对话框只有内置引擎", case_dialog)
     check("打开链接（未选行）", case_open_link_without_selection)
     check("打开链接多级兜底", case_open_external_fallback)
+    check("默认浏览器命令行", case_build_cmdline)
     check("标题换行完整显示", case_titles_wrap)
     check("保存候选", case_save_candidates)
     ok = sum(1 for r in RESULTS if r)

@@ -103,11 +103,15 @@ class RouterDialog(QDialog):
         self.full_btn.clicked.connect(self.open_fulltext)
         self.doi_btn = QPushButton("复制 DOI")
         self.doi_btn.clicked.connect(self.copy_doi)
+        self.url_btn = QPushButton("复制链接")
+        self.url_btn.setToolTip("浏览器没弹出来时，复制链接手动粘贴")
+        self.url_btn.clicked.connect(self.copy_url)
         self.add_btn = QPushButton("保存选中候选并加入论文列表")
         self.add_btn.setEnabled(False)
         self.add_btn.clicked.connect(self.save_candidates)
         bar.addWidget(self.full_btn)
         bar.addWidget(self.doi_btn)
+        bar.addWidget(self.url_btn)
         bar.addStretch(1)
         bar.addWidget(self.add_btn)
         lay.addLayout(bar)
@@ -243,27 +247,44 @@ class RouterDialog(QDialog):
                 return p
         return None
 
+    def _paper_url(self, p) -> str:
+        rd = p.get("readability") or {}
+        url = str(rd.get("url") or "").strip()
+        pmid = str(p.get("pmid") or "").strip()
+        if not url and pmid:
+            url = "https://pubmed.ncbi.nlm.nih.gov/%s/" % pmid
+        return url
+
     def open_fulltext(self):
         p = self._row_paper()
         if not p:
             QMessageBox.information(self, "没有候选", "请先“一键检索候选”，再打开论文链接。")
             return
-        rd = p.get("readability") or {}
-        pmid = str(p.get("pmid") or "").strip()
-        url = str(rd.get("url") or "").strip()
-        if not url and pmid:
-            url = "https://pubmed.ncbi.nlm.nih.gov/%s/" % pmid
+        url = self._paper_url(p)
         if not url:
             QMessageBox.information(self, "没有链接", "这篇候选没有 PMID/链接，无法打开。")
             return
         ok, how = open_external_url(url)
         if ok:
-            self.status.setText("已请求系统打开（%s）：%s" % (how, url))
+            self.status.setText("已请求浏览器打开（%s）：%s　·　若没反应，点“复制链接”手动粘贴"
+                                % (how, url))
             return
         QMessageBox.information(
             self, "未能自动打开浏览器",
             "系统拒绝了自动打开（%s）。\n链接已复制到剪贴板，可粘贴到浏览器：\n%s"
             % (how, url))
+
+    def copy_url(self):
+        p = self._row_paper()
+        if not p:
+            QMessageBox.information(self, "没有候选", "请先“一键检索候选”。")
+            return
+        url = self._paper_url(p)
+        if not url:
+            QMessageBox.information(self, "没有链接", "这篇候选没有 PMID/链接。")
+            return
+        QApplication.clipboard().setText(url)
+        self.status.setText("链接已复制：%s" % url)
 
     def copy_doi(self):
         p = self._row_paper()

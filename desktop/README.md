@@ -126,6 +126,8 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
   如需换站/换 Agent：环境变量 `SCIENCEPAL_BASE_URL` / `SCIENCEPAL_AGENT_ID`（设空则回退按名称查找/自动路由）；
 - **filter agent 也已内置**（同一个 `HCC-Fit` Agent）；环境变量 `SCIENCEPAL_FILTER_AGENT_ID` 优先，
   显式设为空则退回“自动选择可用 Agent/降级 fast”；界面不再询问。
+- 打开链接：优先读注册表里的**默认浏览器**直接启动（比 ShellExecute 可靠），失败再依次尝试
+  ShellExecute / Qt / webbrowser；候选表底部还有 **“复制链接”**，浏览器没弹出来时可手动粘贴；
 - 勾选候选后保存为 `router_candidates_*.md` 并加入论文列表；
 - **这只是题录/摘要，不是全文**；S2 四维核查仍需 PDF 或正文；
 - 该步骤是**可选前置**，不替换 S1，五阶段 Agent 逻辑不变。
