@@ -139,14 +139,17 @@ def open_external_url(url: str) -> tuple[bool, str]:
 
     # 0) 没有浏览器窗口时，先走官方 ShellExecute（用户环境最稳），并用窗口数验证
     before = _browser_window_count()
-    if before == 0:
-        try:
-            os.startfile(url)  # type: ignore[attr-defined]
-            if _wait_browser_window(before, 3.0):
-                return True, "startfile"
-            errors.append("startfile: 浏览器窗口未出现")
-        except Exception as exc:  # noqa: BLE001
-            errors.append("startfile: %s" % exc)
+    try:
+        os.startfile(url)  # type: ignore[attr-defined]
+        if before > 0:
+            # 已有浏览器窗口：ShellExecute 会交给现有实例开新标签页，
+            # 不要再去 spawn msedge（并发时容易 exit=21）
+            return True, "startfile(existing)"
+        if _wait_browser_window(before, 3.0):
+            return True, "startfile"
+        errors.append("startfile: 浏览器窗口未出现")
+    except Exception as exc:  # noqa: BLE001
+        errors.append("startfile: %s" % exc)
 
     # 2) 真实默认浏览器（最可靠）
     ok, how = _launch_default_browser(url)

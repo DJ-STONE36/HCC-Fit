@@ -266,9 +266,14 @@ def case_browser_exit_detected():
     import os
     from app import links
     called = {"start": False}
+    import webbrowser
+    from PySide6.QtGui import QDesktopServices
     orig_launch, orig_start = links._launch_default_browser, os.startfile
     orig_count, orig_wait = links._browser_window_count, links._wait_browser_window
     orig_explorer = links._launch_explorer
+    orig_qt, orig_wb = QDesktopServices.openUrl, webbrowser.open
+    QDesktopServices.openUrl = staticmethod(lambda _u: False)
+    webbrowser.open = lambda _u: False
     links._launch_default_browser = lambda u: (False, links.EXIT_PREFIX + "（exit=21）")
     links._launch_explorer = lambda u: (False, "explorer: test")
     links._browser_window_count = lambda: 0
@@ -282,6 +287,8 @@ def case_browser_exit_detected():
         links._browser_window_count = orig_count
         links._wait_browser_window = orig_wait
         os.startfile = orig_start
+        QDesktopServices.openUrl = orig_qt
+        webbrowser.open = orig_wb
     assert not ok and "exit=21" in how, (ok, how)
     assert called["start"] is True, "应先尝试 startfile"
     return "startfile 没拉起窗口 + 浏览器秒退 → 明确报错"
@@ -302,6 +309,24 @@ def case_startfile_verified():
         links._wait_browser_window = orig_wait
     assert ok and how == "startfile", (ok, how)
     return "ShellExecute 后检测到浏览器窗口 → 成功"
+
+
+def case_startfile_existing():
+    import os
+    from app import links
+    orig_start, orig_count, orig_direct = os.startfile, links._browser_window_count, links._launch_default_browser
+    links._browser_window_count = lambda: 1          # 已有浏览器窗口
+    os.startfile = lambda u: None
+    links._launch_default_browser = lambda u: (_ for _ in ()).throw(
+        AssertionError("已有窗口时不应再 spawn msedge"))
+    try:
+        ok, how = links.open_external_url("https://example.test/x")
+    finally:
+        os.startfile = orig_start
+        links._browser_window_count = orig_count
+        links._launch_default_browser = orig_direct
+    assert ok and how == "startfile(existing)", (ok, how)
+    return "已有浏览器时交给 ShellExecute，不再 spawn（避免 exit=21）"
 
 
 def case_open_external_fallback():
@@ -398,6 +423,7 @@ def main():
     check("打开链接多级兜底", case_open_external_fallback)
     check("浏览器秒退检测", case_browser_exit_detected)
     check("startfile 窗口验证", case_startfile_verified)
+    check("已有浏览器走 ShellExecute", case_startfile_existing)
     check("默认浏览器命令行", case_build_cmdline)
     check("标题换行完整显示", case_titles_wrap)
     check("保存候选", case_save_candidates)

@@ -130,9 +130,9 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
   勾选 **“只看 PMC 免费全文”** 会过滤掉仅摘要候选（会多取一些再筛，返回可能少于 k）；
 - 打开/复制：**选中哪篇就开哪篇**；多选（Ctrl/Shift 或勾选）会同时打开多个网页 / 复制多条链接；
   “复制 DOI”同理（多选每行一个）；没选行时按勾选处理，未勾选才退回第一篇；
-- 打开链接顺序：**ShellExecute（os.startfile）→ 验证浏览器窗口出现 → 直接启动默认浏览器
-  （等 1.2s 看退出码）→ explorer → Qt → webbrowser**；失败时弹窗给出**失败原因**（如 exit=21）
-  并复制链接，不再假报“已请求”
+- 打开链接顺序：**ShellExecute（os.startfile）**；没有浏览器窗口时验证窗口出现，
+  已有窗口则直接交给现有浏览器（**不再 spawn msedge**，避免并发 exit=21）；
+  仍失败才用直接启动/explorer/Qt/webbrowser；失败弹窗给出**失败原因**并复制链接
   ShellExecute / Qt / webbrowser；候选表底部还有 **“复制链接”**，浏览器没弹出来时可手动粘贴；
 - 勾选候选后保存为 `router_candidates_*.md` 并加入论文列表；
 - **这只是题录/摘要，不是全文**；S2 四维核查仍需 PDF 或正文；
