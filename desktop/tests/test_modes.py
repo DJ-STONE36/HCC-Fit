@@ -58,6 +58,11 @@ def case_stub_still_works_for_tests():
     from PySide6.QtWidgets import QApplication
     QApplication.instance() or QApplication([])
     win = MainWindow()
+    from PySide6.QtWidgets import QGroupBox
+    titles = [g.title() for g in win.findChildren(QGroupBox)]
+    assert any("SciencePal 连接" in t for t in titles), titles
+    assert not any("大脑" in t for t in titles), titles
+    assert hasattr(win, "split_papers"), "缺少逐篇发送复选框"
     assert win.mode.count() == 2, win.mode.count()
     win.select_mode("stub")           # 仅自动化：临时加入下拉框
     assert win.current_mode() == "stub"

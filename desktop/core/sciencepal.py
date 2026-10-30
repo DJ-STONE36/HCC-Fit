@@ -216,24 +216,16 @@ class SciencePalBrain(Brain):
         if self.agent_id:
             ids = [str(a.get("id") or a.get("agent_id") or "") for a in items if isinstance(a, dict)]
             if any(i == self.agent_id for i in ids):
-                name = next((a.get("name") for a in items
-                             if isinstance(a, dict)
-                             and str(a.get("id") or a.get("agent_id") or "") == self.agent_id), self.agent_name)
-                return True, "内置 Agent 可用：「%s」（%s）（Key %s）" % (
-                    name or self.agent_name, self.agent_id[:8] + "…", self.key_summary()), real
+                return True, "能连上", []     # 已连到内置 Agent：不再追加名字/Key 尾巴
             if real:
-                return False, ("Key 可见的 Agent 里没有内置 ID %s…；可见：%s。"
-                               "如需换 Agent，设环境变量 SCIENCEPAL_AGENT_ID"
-                               % (self.agent_id[:8], "、".join(real[:8]))), real
-            return True, "能连上；/api/agents 未列出 Agent（将按内置 ID 直接调用）（Key %s）" % self.key_summary(), real
+                return False, ("能连上，但当前 Key 看不到内置 Agent（可能需要授权或换 SCIENCEPAL_AGENT_ID）；"
+                               "可见：%s" % "、".join(real[:8])), real
+            return True, "能连上", []
         hit = any((n or "").strip().lower() == self.agent_name.strip().lower() for n in names)
-        if not real:
-            hint = "能连上；/api/agents 没列出 Agent，将走平台自动路由（不影响使用）"
-        elif hit:
-            hint = "找到 Agent「%s」" % self.agent_name
-        else:
-            hint = "能连上；未匹配到「%s」，将走自动路由；可见：%s" % (self.agent_name, "、".join(real[:8]))
-        return True, hint + "（Key %s）" % self.key_summary(), real
+        if not real or hit:
+            return True, "能连上", []
+        return False, ("能连上，但未匹配到「%s」；可见：%s"
+                       % (self.agent_name, "、".join(real[:8]))), real
 
     def _agent_names(self):
         status, body = self._json("GET", "/api/agents")

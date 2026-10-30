@@ -9,7 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, QStandardPaths, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QFont
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QGroupBox,
+    QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
     QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
     QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QTextBrowser,
@@ -231,8 +231,13 @@ class MainWindow(QMainWindow):
         rh.addWidget(self.router_btn)
         rh.addStretch(1)
         fv.addLayout(rh)
+        self.split_papers = QCheckBox("多篇时逐篇发给 Agent（较慢）")
+        self.split_papers.setToolTip(
+            "勾选后：五阶段模式对每篇论文单独做 S2 匹配；单次核查模式对每篇论文单独出报告，"
+            "结果合并到同一份 visit。不勾选则所有论文一起发给 Agent。")
+        fv.addWidget(self.split_papers)
 
-        brain = QGroupBox("1 · 大脑 / SciencePal 连接")
+        brain = QGroupBox("1 · SciencePal 连接")
         bv = QVBoxLayout(brain)
         self.mode = QComboBox()
         for label, value in MODES:
@@ -635,6 +640,7 @@ class MainWindow(QMainWindow):
         opts = {
             "api_key": self.key.text().strip(),
             "timeout": 240 if mode == "sciencepal_hcc" else 180,
+            "split_papers": self.split_papers.isChecked(),
         }
         self.thread = QThread(self)
         self.worker = RunWorker(mode, str(ws), scenario, names, opts)
@@ -1055,7 +1061,7 @@ class MainWindow(QMainWindow):
 
     def _on_probe(self, ok: bool, msg: str, names: list):
         text = ("✅ " if ok else "⚠️ ") + msg
-        if names:
+        if not ok and names:                 # 成功时不再追加“可见：...”等尾巴
             text += "（可见：%s）" % "、".join(names)
         self.probe_msg.setText(text)
         self.probe_btn.setEnabled(True)
@@ -1111,6 +1117,7 @@ class MainWindow(QMainWindow):
         self.outcome.setText(s.value("outcome", "1 年内复发"))
         self.given.setText(s.value("given", ""))
         self.missing.setText(s.value("missing", ""))
+        self.split_papers.setChecked(s.value("split_papers", "false") in (True, "true", "1", 1))
         tp = s.value("timepoint", "pre_surgery")
         ti = self.timepoint.findData(tp)
         if ti >= 0:
@@ -1125,6 +1132,7 @@ class MainWindow(QMainWindow):
         s.setValue("given", self.given.text())
         s.setValue("missing", self.missing.text())
         s.setValue("timepoint", self.timepoint.currentData())
+        s.setValue("split_papers", self.split_papers.isChecked())
         # 不保存 Key
 
     def closeEvent(self, event):

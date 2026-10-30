@@ -123,12 +123,27 @@ def case_builtin_agent_id():
     return "默认直接使用内置 Agent ID（不查列表）"
 
 
+
+def case_probe_short_message():
+    brain, ws = _brain()
+    try:
+        brain._json = lambda *a, **k: (200, {"agents": [
+            {"name": "HCC-Fit", "agent_id": brain.agent_id}]})
+        ok, msg, names = brain.probe()
+        assert ok and msg == "能连上", (ok, msg)
+        assert names == [], names
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+    return "已连到内置 Agent 时只显示“能连上”"
+
+
 def main():
     check("追问 asked", case_asked)
     check("失败终态", case_failed)
     check("HTTP 错误提示", case_http_hints)
     check("initiate 参数", case_initiate_params)
     check("内置 Agent ID", case_builtin_agent_id)
+    check("测试连接短文案", case_probe_short_message)
     ok = sum(1 for r in RESULTS if r)
     print("\n%d/%d 通过" % (ok, len(RESULTS)))
     return 0 if ok == len(RESULTS) else 1

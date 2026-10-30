@@ -347,13 +347,14 @@ curl http://127.0.0.1:8080/healthz
 | **SciencePal 调用修正** | Router 改为 initiate(stream=true) → 立即读流(after_index=0) → 确认终态，修掉“轮询完再读流拿空答案 → balanced 静默降级”；支持 asked/failed/stopped；模型默认留空；补 `agent_select_type=manual` 与 401/403/404/422/429 中文提示 |
 | **桌面端** | `_poll` 识别 `asked`（明确报错，不再空等）；新增 `_http_hint`；initiate 补 `agent_select_type` |
 | **Router token** | 界面不再要求填 token；服务端默认不鉴权（留空），仅远程部署用 `HCCFIT_ROUTER_TOKEN` |
-| **界面收敛** | 去掉“检索方式/外部地址/token/filter agent”输入，只保留内置引擎；Key 与“大脑”合并为左侧最上方“1 · 大脑 / SciencePal 连接”（场景之上）；Key 空/非 ASCII/空格实时红字警告，启动与 balanced 会拦截 |
+| **界面收敛** | 去掉“检索方式/外部地址/token/filter agent”输入，只保留内置引擎；Key 与模式选择合并为左侧最上方“1 · SciencePal 连接”（场景之上，已去掉“大脑”字样）；Key 空/非 ASCII/空格实时红字警告，启动与 balanced 会拦截 |
 | **fast vs balanced 文档** | 接入说明新增 3.1：fast 0 条提示词（全规则），balanced 1 条提示词（逐句解释 + 解析/降级路径） |
 | **只填 Key 的 balanced** | 未配 `SCIENCEPAL_FILTER_AGENT_ID` 时自动从可用 Agent 里选（唯一可用，或名称含 filter/筛/审核/HCC 的唯一匹配）；无法唯一确定才降级 fast，并提示显式配置；成功时 warning 标注“已自动使用…” |
 | **候选对话框修复** | “打开 PMC/PubMed”未选行时默认打开第一篇、并有浏览器失败兜底；标题列不再截断（行高随内容换行）；保存候选出错不再静默（弹错误框），未勾选时可一键保存全部；新增 3 项 UI 测试 → test_router_engine 9/9 |
 | **对话框修复 2** | 打开链接改为 `startfile`→Qt→webbrowser 三级兜底并给出可见反馈；标题列加宽、风险列收窄、其余列固定/可调且全部换行，行高在布局完成后统一计算（修掉超高行）；数据目录改为“探针可写”选择，`LocalLow` 不可写时自动回退（解决保存 PermissionError）；新增 test_paths（2 项） |
 | **真 Key 端到端验证（2026-10-30）** | Key 有效（51 位）；账号 6 个可用 Agent，指定的 `61033129-…-280a` 为自定义「HCC-Fit」且在列表中；`/billing/available-models` 5 个模型；balanced 实测 completed（36–41s，含真实 keep/drop）；发现 fit 尺度歧义（理由写“匹配”却给 fit=0 → 全丢）→ 提示词固定 0/1/2 含义后同一 Agent 稳定给 fit=2；keep 全空时回退算法 top-k 并置 degraded |
 | **内置 Agent** | 桌面 `DEFAULT_AGENT_ID` 与 Router `DEFAULT_FILTER_AGENT_ID` 均指向实测可用的 `HCC-Fit`；界面去掉 Base/Agent 输入，只留 Key；`SCIENCEPAL_AGENT_ID` / `SCIENCEPAL_FILTER_AGENT_ID` 可覆盖，设空则回退查找/自动路由；Key 无权使用内置 Agent（403/404）时自动退回按名称/平台路由 |
+| **逐篇发送 + 文案** | 标题去“大脑”；测试连接成功只显示“能连上”；新增复选框“多篇论文时逐篇发给 Agent”：五阶段逐篇 S2、单次核查逐篇出报告后合并 papers/matched/期望数据（默认一次带全部）；新增 test_split_papers 4 项 |
 | **接入文档** | 新增 `docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`（官方 8 条规则、fast vs balanced、五阶段、错误码、本次修复） |
 | **测试** | Router 新增 `test_agent_client.py`（8 项，全离线）→ 19 项；桌面新增 `test_sciencepal_client.py`（4 项）→ 9 个脚本 |
 

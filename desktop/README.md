@@ -23,7 +23,8 @@ python main.py
 
 - 场景：**一个自由输入框**（一段话）+ 解析后的可编辑场景卡；追问、确认后才进入核查；
 - 论文：拖拽或选择文件、粘贴关键段落、**内置 PubMed 候选检索**（无需启动服务）；
-- 大脑：2 种模式（SciencePal Agent 五阶段 / HCC-Fit 单次报告）、Key、Base、Agent、测试连接；
+- 多篇：可勾选 **“多篇论文时逐篇发给 Agent”**（五阶段逐篇 S2；单次核查逐篇出报告后合并；较慢但更聚焦）；
+- 连接：2 种模式（SciencePal Agent 五阶段 / HCC-Fit 单次报告）、只填 Key（Base/Agent 内置）、测试连接；
   “演示 / 本地模拟 / 人工中转”已于 2026-10-30 按要求从界面移除；
 - 流程：五阶段或 HCC 单次核查的实时状态；
 - 结果：结论、四维表（含证据强度）、逐维理由与引文、论文/方案/期望、原始返回；
@@ -106,7 +107,7 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
 - **不需要单独启动服务、不占 8080、不需要 uvicorn**；打包时 `router/hccfit` 已随 exe 一起带走；
 - 对话框只显示**内置引擎**状态（是否可用、策略、Key / filter agent 是否配置）；不再有“检索方式”切换；
 - 选 `fast`（5–10 秒）或 `balanced`（60–90 秒），选 k（1–8），点 **“一键检索候选”**；
-- **只需要填 SciencePal Key 一处**：左侧最上方 **“1 · 大脑 / SciencePal 连接”**；
+- **只需要填 SciencePal Key 一处**：左侧最上方 **“1 · SciencePal 连接”**；
   Base（`https://sciencepal.ai`）与 Agent（`HCC-Fit`，ID `61033129-…-280a`）**已内置**，不用填；
   空/非 ASCII/含空格会实时红字警告，`start_run` 与 balanced 检索也会拦住并提示；
   如需换站/换 Agent：环境变量 `SCIENCEPAL_BASE_URL` / `SCIENCEPAL_AGENT_ID`（设空则回退按名称查找/自动路由）；

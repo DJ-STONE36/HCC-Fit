@@ -50,12 +50,14 @@ def _split(text):
 
 
 class Planner:
-    def __init__(self, brain, workspace: str, scenario: dict, emit=None, files=None):
+    def __init__(self, brain, workspace: str, scenario: dict, emit=None, files=None,
+                 split_papers: bool = False):
         self.brain = brain
         self.workspace = workspace
         self.scenario = scenario
         self.emit = emit or (lambda ev: None)
         self.files = files or []
+        self.split_papers = bool(split_papers)   # 多篇时逐篇发给 Agent（S2 单独调用）
         self.timing = {}
         self.saved_path = None
         self.text_fallbacks = []
@@ -83,7 +85,7 @@ class Planner:
             self.raw_answers.append({"stage": key, "text": str(raw)[:1500]})
             self.brain.last_text = None
         ms = int((time.time() - t0) * 1000)
-        self.timing[key] = ms
+        self.timing[key] = self.timing.get(key, 0) + ms
         out = self._degrade(key, out)
         self.emit({"stage": key, "label": STAGE_LABEL[key], "status": "ok", "ms": ms,
                    "detail": self._brief(key, out)})
@@ -132,6 +134,16 @@ class Planner:
             return "%d 项待补数据" % len(out.get("expected_data", []))
         return ""
 
+    def _paper_file(self, paper: dict, index: int) -> str:
+        """把 S1 的论文映射回 files 里的文件名（优先 file_path 的 basename）。"""
+        fp = str((paper or {}).get("file_path") or "").strip()
+        name = os.path.basename(fp) if fp else ""
+        if name and name in self.files:
+            return name
+        if 0 <= index < len(self.files):
+            return self.files[index]
+        return ""
+
     # ---------- 主流程 ----------
     def run(self):
         base = {"scenario": self.scenario, "files": self.files}
@@ -142,8 +154,18 @@ class Planner:
         papers = papers_out.get("papers", [])
         included = [p for p in papers if p.get("decision") == "include"]
 
-        matched_out = self._stage("match", dict(base, included=included, papers=papers))
-        matched = matched_out.get("matched", [])
+        if self.split_papers and len(included) > 1:
+            matched = []
+            for i, one in enumerate(included):
+                fname = self._paper_file(one, i)
+                payload = dict(base, included=[one], papers=[one],
+                               files=([fname] if fname else self.files),
+                               batch="%d/%d" % (i + 1, len(included)))
+                out = self._stage("match", payload)
+                matched.extend(out.get("matched") or [])
+        else:
+            matched_out = self._stage("match", dict(base, included=included, papers=papers))
+            matched = matched_out.get("matched", [])
 
         integrated = self._stage("integrate", dict(base, matched=matched, papers=included))
 
@@ -216,39 +238,131 @@ class Planner:
         return path
 
 
+def _merge_hcc_visits(visits) -> dict:
+    """把“逐篇核查”的多份 visit 合并成一份：papers/matched 叠加，摘要分段，期望数据去重。"""
+    base = dict(visits[0])
+    base["visit_id"] = "visit_%d_%s" % (int(time.time()), uuid.uuid4().hex[:6])
+    base["papers"] = [p for v in visits for p in (v.get("papers") or [])]
+    base["matched"] = [m for v in visits for m in (v.get("matched") or [])]
+
+    parts = []
+    for v in visits:
+        title = ""
+        ps = v.get("papers") or []
+        if ps:
+            title = ps[0].get("title") or ps[0].get("file_path") or ""
+        summary = (v.get("integrated") or {}).get("summary_zh") or ""
+        if summary.strip():
+            parts.append(("【%s】%s" % (title, summary)) if title else summary)
+    integrated = dict(base.get("integrated") or {})
+    integrated["summary_zh"] = "\n\n".join(parts)
+
+    def _uniq(items, key):
+        seen, out = set(), []
+        for it in items:
+            k = key(it)
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(it)
+        return out
+
+    integrated["cautions_zh"] = _uniq(
+        [c for v in visits for c in (v.get("integrated") or {}).get("cautions_zh") or []],
+        lambda c: str(c))
+    base["integrated"] = integrated
+    base["expected_data"] = _uniq(
+        [e for v in visits for e in (v.get("expected_data") or [])],
+        lambda e: (e.get("item_zh"), e.get("kind")))
+    base["uncertainties"] = _uniq(
+        [u for v in visits for u in (v.get("uncertainties") or [])], lambda u: str(u))[:12]
+    base["raw_answers"] = [a for v in visits for a in (v.get("raw_answers") or [])]
+    base["raw_excerpts"] = [a for v in visits for a in (v.get("raw_excerpts") or [])]
+    base["parse_mode"] = ("structured"
+                          if all(v.get("parse_mode") == "structured" for v in visits)
+                          else "text_fallback")
+    prov = dict(base.get("provenance") or {})
+    prov["files"] = [f for v in visits for f in (v.get("provenance") or {}).get("files") or []]
+    prov["stages_ms"] = {"hcc": sum(int((v.get("provenance") or {}).get("stages_ms", {})
+                                       .get("hcc", 0)) for v in visits)}
+    base["provenance"] = prov
+    return base
+
+
 class HccPlanner:
-    """SciencePal HCC-Fit Agent 的单次核查：一条 prompt → 一份报告 → visit.json。"""
+    """SciencePal HCC-Fit Agent 的单次核查：一条 prompt → 一份报告 → visit.json。
+
+    split_papers=True 且有多篇时：逐篇调用 Agent，再把 matched/papers/期望数据合并成一份 visit。
+    """
 
     LABEL = "HCC-Fit 单次核查"
 
-    def __init__(self, brain, workspace: str, scenario: dict, emit=None, files=None):
+    def __init__(self, brain, workspace: str, scenario: dict, emit=None, files=None,
+                 split_papers: bool = False):
         self.brain = brain
         self.workspace = workspace
         self.scenario = scenario or {}
         self.emit = emit or (lambda ev: None)
         self.files = files or []
+        self.split_papers = bool(split_papers)
         self.saved_path = None
 
-    def _paper_text(self):
+    def _paper_text(self, files=None):
+        files = list(files if files is not None else self.files)
         text = (self.scenario.get("paper_text") or "").strip()
-        if text or not self.files:
+        if text or not files:
             return text
         try:                                   # 用户只传了 PDF：抠出文字兜底
             from pdftext import extract
-            path = os.path.join(self.workspace, "files", self.files[0])
+            path = os.path.join(self.workspace, "files", files[0])
             text, note = extract(path)
             return text or ""
         except Exception:
             return ""
 
     def run(self):
+        self.emit({"stage": "hcc", "label": self.LABEL, "status": "start"})
+
+        if self.split_papers and len(self.files) > 1:
+            visits = []
+            for i, name in enumerate(self.files):
+                self.emit({"stage": "hcc", "label": self.LABEL, "status": "progress",
+                           "detail": "逐篇 %d/%d：%s" % (i + 1, len(self.files), name)})
+                visits.append(self._run_one([name]))
+            visit = _merge_hcc_visits(visits)
+            self._save(visit)
+            matched = visit.get("matched") or []
+            total = sum(int((v.get("provenance") or {}).get("stages_ms", {}).get("hcc", 0))
+                        for v in visits)
+            self.emit({"stage": "hcc", "label": self.LABEL, "status": "ok", "ms": total,
+                       "detail": "逐篇完成 %d 篇%s" % (
+                           len(visits),
+                           ("，首篇 tier=%s" % matched[0]["tier"]) if matched else "")})
+            if visit.get("parse_mode") == "text_fallback":
+                self.emit({"stage": "hcc", "label": self.LABEL, "status": "degraded",
+                           "detail": "部分论文 Agent 未按 JSON 返回，已展示原文"})
+            return visit
+
+        visit = self._run_one(self.files[:1])
+        matched = visit.get("matched") or []
+        detail = ("tier=%s" % matched[0]["tier"]) if matched else "原文降级"
+        if any(a.get("stage") == "hcc_original" for a in visit.get("raw_answers") or []):
+            detail += "（二次 JSON 修复）"
+        self.emit({"stage": "hcc", "label": self.LABEL, "status": "ok",
+                   "ms": int((visit.get("provenance") or {}).get("stages_ms", {}).get("hcc", 0)),
+                   "detail": detail})
+        if visit.get("parse_mode") == "text_fallback":
+            self.emit({"stage": "hcc", "label": self.LABEL, "status": "degraded",
+                       "detail": "Agent 未按 JSON 返回，已展示原文"})
+        return visit
+
+    def _run_one(self, one):
+        """对一份（或一组）论文跑一次单次核查，返回 visit（不落盘）。"""
         from hcc_report import build_prompt, normalize_report
 
-        self.emit({"stage": "hcc", "label": self.LABEL, "status": "start"})
         t0 = time.time()
-        one = self.files[:1]                  # 单次核查只取第一份论文
         try:
-            prompt = build_prompt(self.scenario, self._paper_text(), one)
+            prompt = build_prompt(self.scenario, self._paper_text(one), one)
             abs_files = [os.path.join(self.workspace, "files", f) for f in one]
             out = self.brain.run_hcc_report(prompt, abs_files)
         except BrainError as exc:
@@ -287,16 +401,6 @@ class HccPlanner:
                                  agent_name=getattr(self.brain, "agent_name", None))
         if repaired and original_text:
             visit["raw_answers"].insert(0, {"stage": "hcc_original", "text": original_text[:8000]})
-        self._save(visit)
-
-        if visit.get("parse_mode") == "text_fallback":
-            self.emit({"stage": "hcc", "label": self.LABEL, "status": "degraded",
-                       "detail": "Agent 未按 JSON 返回，已展示原文"})
-        matched = visit.get("matched") or []
-        detail = ("tier=%s" % matched[0]["tier"]) if matched else "原文降级"
-        if repaired:
-            detail += "（二次 JSON 修复）"
-        self.emit({"stage": "hcc", "label": self.LABEL, "status": "ok", "ms": ms, "detail": detail})
         return visit
 
     def _save(self, visit):
