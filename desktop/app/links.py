@@ -55,15 +55,25 @@ def build_cmdline(command: str, url: str) -> str:
     return '%s "%s"' % (command, url)
 
 
+EXIT_PREFIX = "浏览器进程启动后立即退出"
+
+
 def _launch_default_browser(url: str) -> tuple[bool, str]:
+    """启动默认浏览器；等 1.2s 看它是否立刻退出（被安全软件/沙箱拦截时 exit≠0）。"""
     cmd = default_browser_command()
     if not cmd:
         return False, "没读到默认浏览器"
     try:
-        subprocess.Popen(build_cmdline(cmd, url), close_fds=True)
-        return True, "default-browser"
+        proc = subprocess.Popen(build_cmdline(cmd, url), close_fds=True)
     except Exception as exc:  # noqa: BLE001
         return False, "default-browser: %s" % exc
+    try:
+        code = proc.wait(timeout=1.2)
+    except subprocess.TimeoutExpired:
+        return True, "default-browser"       # 还活着：窗口已起来
+    if code == 0:
+        return True, "default-browser(handoff)"   # 交给已有浏览器实例后正常退出
+    return False, "%s（exit=%d）" % (EXIT_PREFIX, code)
 
 
 def open_external_url(url: str) -> tuple[bool, str]:
@@ -79,6 +89,13 @@ def open_external_url(url: str) -> tuple[bool, str]:
     if ok:
         return True, how
     errors.append(how)
+    if how.startswith(EXIT_PREFIX):
+        # 浏览器进程启动即被拦截：ShellExecute/Qt 用的是同一个处理器，不再假装成功
+        try:
+            QApplication.clipboard().setText(url)
+        except Exception:  # noqa: BLE001
+            pass
+        return False, how + "；可能被安全软件/运行环境限制，已复制链接，请手动粘贴到浏览器"
 
     # 2) Windows ShellExecute
     if os.name == "nt":

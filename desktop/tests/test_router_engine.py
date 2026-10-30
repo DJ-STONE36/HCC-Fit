@@ -261,6 +261,24 @@ def case_button_click_opens_selected():
     return "真实按钮点击也能打开选中行"
 
 
+
+def case_browser_exit_detected():
+    import os
+    from app import links
+    called = {"start": False}
+    orig_launch, orig_start = links._launch_default_browser, os.startfile
+    links._launch_default_browser = lambda u: (False, links.EXIT_PREFIX + "（exit=21）")
+    os.startfile = lambda u: called.__setitem__("start", True)
+    try:
+        ok, how = links.open_external_url("https://example.test/x")
+    finally:
+        links._launch_default_browser = orig_launch
+        os.startfile = orig_start
+    assert not ok and "exit=21" in how, (ok, how)
+    assert called["start"] is False, "秒退后不应再用 startfile 假成功"
+    return "浏览器秒退时明确报错，不再假成功"
+
+
 def case_open_external_fallback():
     import os
     import webbrowser
@@ -347,6 +365,7 @@ def main():
     check("打开链接（勾选兜底）", case_open_checked_fallback)
     check("复制 DOI（多选）", case_copy_doi_multi)
     check("打开链接多级兜底", case_open_external_fallback)
+    check("浏览器秒退检测", case_browser_exit_detected)
     check("默认浏览器命令行", case_build_cmdline)
     check("标题换行完整显示", case_titles_wrap)
     check("保存候选", case_save_candidates)
