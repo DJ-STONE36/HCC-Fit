@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hcc-fit.local/schemas/supplement.schema.json",
+  "title": "HCC-Fit supplement v0.1",
+  "type": "object",
+  "required": [
+    "supplement_id",
+    "parent_visit_id",
+    "raw_text",
+    "created_at"
+  ],
+  "properties": {
+    "supplement_id": {
+      "type": "string",
+      "pattern": "^sup_[0-9]{8}_[a-f0-9]{8}$"
+    },
+    "parent_visit_id": {
+      "type": "string"
+    },
+    "parent_input_id": {
+      "type": "string"
+    },
+    "raw_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "new_visit_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expected_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "item_zh"
+        ],
+        "properties": {
+          "item_zh": {
+            "type": "string"
+          },
+          "why_zh": {
+            "type": "string"
+          },
+          "unlocks_zh": {
+            "type": "string"
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checked": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

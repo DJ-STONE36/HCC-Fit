@@ -1,0 +1,57 @@
+{
+  "request_id": "req-demo-001",
+  "strategy_requested": "auto",
+  "strategy_used": "balanced",
+  "scenario": {
+    "text": "..."
+  },
+  "papers": [
+    {
+      "pmid": "40052130",
+      "doi": "10.3389/fonc.2025.1559083",
+      "title": "...",
+      "journal": "...",
+      "year": 2025,
+      "why": [
+        "为什么选"
+      ],
+      "risk": [
+        "冲突/未知"
+      ],
+      "sp_fit": 2,
+      "sp_reason": "SciencePal 的 fit 理由",
+      "readability": {
+        "level": "fulltext",
+        "pmcid": "PMC11882412",
+        "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11882412/",
+        "full_text": true
+      }
+    }
+  ],
+  "meta": {
+    "strategy_used": "balanced",
+    "latency_ms": 85000,
+    "retrieval_ms": 5200,
+    "llm_ms": 78000,
+    "filter_in": 10,
+    "filter_out": 5,
+    "papers_returned": 5,
+    "readability_counts": {
+      "fulltext": 5,
+      "abstract_only": 0,
+      "metadata_only": 0
+    },
+    "degraded": false,
+    "readability": {
+      "fulltext": 5,
+      "abstract_only": 0,
+      "metadata_only": 0
+    }
+  },
+  "warnings": [],
+  "next_actions": [
+    "open_full_text",
+    "verify_model_variables",
+    "ask_missing_parameters"
+  ]
+}

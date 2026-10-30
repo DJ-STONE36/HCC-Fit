@@ -1,0 +1,18 @@
+# 构建产物与缓存（体积大、可重建，不入库）
+desktop_build/
+desktop/dist/
+desktop/build/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# 运行期数据：绝不入库（可能含真实患者信息）
+inputs/
+supplements/
+workspaces/
+*.log
+.env
+.env.*

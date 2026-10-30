@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hcc-fit.local/schemas/input_session.schema.json",
+  "title": "HCC-Fit input session v0.1",
+  "type": "object",
+  "required": ["input_id", "raw_text", "version", "fields", "confirmation"],
+  "properties": {
+    "input_id": {"type": "string", "pattern": "^in_[0-9]{8}_[a-f0-9]{8}$"},
+    "raw_text": {"type": "string", "minLength": 1},
+    "version": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string"},
+    "fields": {
+      "type": "object",
+      "required": ["disease", "treatment", "stage", "outcome", "start_point", "horizon", "intent"],
+      "additionalProperties": {
+        "type": "object",
+        "required": ["field", "raw", "normalized", "status", "confirm"],
+        "properties": {
+          "field": {"type": "string"},
+          "raw": {"type": "string"},
+          "normalized": {"type": "string"},
+          "status": {
+            "enum": ["normalized", "ambiguous", "suspected", "negated",
+                     "historical", "conflict", "unknown", "out_of_scope"]
+          },
+          "source_span": {
+            "type": ["array", "null"],
+            "items": {"type": "integer"},
+            "minItems": 0,
+            "maxItems": 2
+          },
+          "source_sentence": {"type": "string"},
+          "confirm": {
+            "enum": ["pending", "user_confirmed", "user_edited", "user_unknown"]
+          },
+          "candidates": {"type": "array"},
+          "flags": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "data_available": {"type": "array"},
+    "conflicts": {"type": "array"},
+    "followups": {"type": "array"},
+    "confirmation": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["pending", "user_confirmed", "user_edited", "user_unknown"]},
+        "confirmed_at": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

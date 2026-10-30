@@ -1,0 +1,430 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hccfit/app/visit.schema.json",
+  "title": "Visit Result（就诊结果 · 前端唯一数据源）",
+  "description": "一次'需求+病人基础 → 读论文 → 多篇匹配 → 综合方案 → 就诊反馈'的完整产物。前端不得计算、不得改写文案。mode=stub 时必须在界面显著标注'演示数据'。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "visit_id",
+    "created_at",
+    "mode",
+    "scenario",
+    "domain",
+    "papers",
+    "matched",
+    "integrated",
+    "expected_data",
+    "uncertainties",
+    "disclaimer_zh"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "visit_id": {
+      "type": "string",
+      "pattern": "^visit_[A-Za-z0-9_-]{4,32}$"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "stub",
+        "sciencepal",
+        "sciencepal_hcc",
+        "mock_sp",
+        "manual"
+      ]
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_zh",
+        "patient_summary_zh",
+        "use_timepoint",
+        "outcome_type",
+        "inputs_given",
+        "inputs_missing"
+      ],
+      "properties": {
+        "task_zh": {
+          "type": "string",
+          "minLength": 8
+        },
+        "patient_summary_zh": {
+          "type": "string",
+          "minLength": 8
+        },
+        "use_timepoint": {
+          "type": "string"
+        },
+        "outcome_type": {
+          "type": "string"
+        },
+        "inputs_given": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "inputs_missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "note_zh"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "in_scope",
+            "outside_scope",
+            "unclear"
+          ]
+        },
+        "note_zh": {
+          "type": "string"
+        }
+      }
+    },
+    "papers": {
+      "type": "array",
+      "description": "论文选择环节的结果（含被排除的与理由）。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "source",
+          "decision",
+          "reason_zh"
+        ],
+        "properties": {
+          "paper_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 6
+          },
+          "doi": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source": {
+            "enum": [
+              "uploaded",
+              "search"
+            ]
+          },
+          "decision": {
+            "enum": [
+              "include",
+              "exclude"
+            ]
+          },
+          "reason_zh": {
+            "type": "string",
+            "minLength": 4
+          },
+          "file_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "matched": {
+      "type": "array",
+      "description": "每篇被纳入论文与场景的逐维匹配结果。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "paper_id",
+          "dimensions",
+          "tier"
+        ],
+        "properties": {
+          "paper_id": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "status",
+                "reason_zh"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "match",
+                    "mismatch",
+                    "unknown"
+                  ]
+                },
+                "reason_zh": {
+                  "type": "string"
+                },
+                "quote": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "tier": {
+            "enum": [
+              "applicable",
+              "conditional",
+              "undetermined",
+              "not_applicable"
+            ]
+          },
+          "evidence_strength": {
+            "enum": [
+              "strong",
+              "moderate",
+              "weak",
+              "insufficient",
+              null
+            ]
+          }
+        }
+      }
+    },
+    "integrated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary_zh",
+        "options",
+        "cautions_zh"
+      ],
+      "properties": {
+        "summary_zh": {
+          "type": "string",
+          "minLength": 8
+        },
+        "options": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "basis_paper_ids",
+              "confidence",
+              "note_zh"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 2
+              },
+              "basis_paper_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "confidence": {
+                "enum": [
+                  "high",
+                  "moderate",
+                  "low"
+                ]
+              },
+              "note_zh": {
+                "type": "string"
+              },
+              "what_it_needs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "cautions_zh": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "expected_data": {
+      "type": "array",
+      "description": "期望补充的数据/资料（含为何需要、补齐能解锁什么）。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item_zh",
+          "why_zh"
+        ],
+        "properties": {
+          "item_zh": {
+            "type": "string",
+            "minLength": 2
+          },
+          "why_zh": {
+            "type": "string",
+            "minLength": 4
+          },
+          "unlocks_zh": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cost_hint_zh": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "lab",
+              "imaging",
+              "pathology",
+              "history",
+              "other",
+              null
+            ]
+          }
+        }
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 4
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brain": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agent_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stages_ms": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "disclaimer_zh": {
+      "type": "string",
+      "minLength": 10
+    },
+    "parse_mode": {
+      "enum": [
+        "structured",
+        "text_fallback"
+      ],
+      "description": "本次各阶段是否都按 JSON 返回；text_fallback 表示 Agent 给了自然语言，已降级保存原文。"
+    },
+    "raw_excerpts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage",
+          "text"
+        ],
+        "properties": {
+          "stage": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "raw_answers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage",
+          "text"
+        ],
+        "properties": {
+          "stage": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

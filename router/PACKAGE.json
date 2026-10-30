@@ -1,0 +1,17 @@
+{
+  "package": "HCC-Fit_Simple_Router",
+  "default_strategy": "auto",
+  "enabled_strategies": [
+    "fast",
+    "balanced",
+    "auto"
+  ],
+  "latency": "5-100s",
+  "llm": "fast=no LLM; balanced=SciencePal filter",
+  "require_fulltext_default": true,
+  "routing": {
+    "deadline_ms<=15000": "fast",
+    "else": "balanced",
+    "thinking": "ignored (deep disabled)"
+  }
+}

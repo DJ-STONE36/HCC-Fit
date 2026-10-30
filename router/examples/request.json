@@ -1,0 +1,17 @@
+{
+  "scenario": {
+    "text": "男，58岁，乙肝，肝癌，已行根治性切除，术后病理MVI阳性、肿瘤3.2cm、单发；术前AFP 820 ng/mL，Child-Pugh A，PLT 120，TBIL 18，ALBI -2.4。想知道3年总生存的预测模型。",
+    "disease": "HCC",
+    "treatment_state": "curative resection",
+    "time_zero": "surgery",
+    "outcome": "OS",
+    "horizon_months": 36,
+    "variables": ["AFP", "MVI", "tumor size", "tumor number", "Child-Pugh", "PLT", "TBIL", "ALBI"]
+  },
+  "strategy": "auto",
+  "k": 5,
+  "deadline_ms": 120000,
+  "thinking": false,
+  "require_fulltext": true,
+  "request_id": "req-demo-001"
+}

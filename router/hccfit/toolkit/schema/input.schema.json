@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HCC scenario input (frontend form)",
+  "type": "object",
+  "description": "所有字段都可选；空 = 未提供，不要用默认值填充。至少提供 text 或一个结构化字段。",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "自由文本；可以只有一句话"
+    },
+    "disease": {
+      "type": "string",
+      "description": "HCC only；iCCA/肝转移/肝癌未明确会被服务拒绝"
+    },
+    "treatment_state": {
+      "type": "string",
+      "description": "如 curative resection / TACE / HAIC / systemic / transplant；不确定用 unspecified 或 any"
+    },
+    "time_zero": {
+      "type": "string",
+      "description": "如 surgery / tace / systemic / transplant；不确定用 any"
+    },
+    "outcome": {
+      "type": "string",
+      "description": "如 OS / RFS / PFS / PHLF / response / LOS；不确定用 any"
+    },
+    "horizon_months": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 120
+    },
+    "etiology": {
+      "type": "string",
+      "description": "如 HBV / HCV / NAFLD / unknown"
+    },
+    "variables": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "year_min": {
+      "type": "integer",
+      "default": 0
+    },
+    "must_have": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "exclude_terms": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

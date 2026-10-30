@@ -1,0 +1,771 @@
+# -*- coding: utf-8 -*-
+"""
+input_normalization.py — 单场景自由输入的规则层（v0.1）
+
+设计约束（来自交接表）：
+- 医生只写一段话；本模块把这段话拆成字段，不要求医生用标准词；
+- 每个字段保存：原话、整理值、状态、来源片段、确认状态；
+- 原话不覆盖；未知不补造；
+- "肝癌 / 肝脏肿瘤 / 恶性肿瘤" 永远不自动归一为 HCC；
+- 否定、疑似、既往、时间、冲突都保留，不自动选一个；
+- AI 只提供候选，不能覆盖规则给出的明确状态，也不能把模型概率当医学事实。
+
+本模块不依赖 PySide6，可单独测试。
+"""
+from __future__ import annotations
+
+import csv
+import json
+import re
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Iterable, Protocol
+
+# ---------------- 常量 ----------------
+
+FIELD_ORDER = ("disease", "treatment", "stage", "postop_duration",
+               "outcome", "start_point", "horizon", "intent", "subject")
+
+FIELD_LABEL = {
+    "disease": "疾病",
+    "treatment": "治疗",
+    "stage": "当前阶段",
+    "postop_duration": "已术后时长",
+    "outcome": "预测结局",
+    "start_point": "预测起点",
+    "horizon": "预测范围",
+    "intent": "想问的问题",
+    "subject": "患者主体",
+}
+
+STATUS_LABEL = {
+    "normalized": "已归一",
+    "ambiguous": "待确认",
+    "suspected": "疑似",
+    "negated": "否定",
+    "historical": "既往史",
+    "conflict": "冲突",
+    "unknown": "未知",
+    "out_of_scope": "范围外",
+}
+
+HISTORY_CUES = ("既往", "曾", "以前", "病史", "多年前", "之前")
+SUSPECT_CUES = ("疑似", "考虑", "待排", "可能", "不除外", "疑为", "高度怀疑")
+NEG_CUES = ("非", "不是", "排除", "未见", "否认", "无", "未发现")
+
+HORIZON_MONTHS = {
+    "一年": 12, "1年": 12, "12个月": 12,
+    "两年": 24, "2年": 24, "24个月": 24,
+    "三年": 36, "3年": 36, "36个月": 36,
+    "五年": 60, "5年": 60, "60个月": 60,
+}
+
+UNIT_MAP = {
+    "year": ("year", 12),
+    "years": ("year", 12),
+    "month": ("month", 1),
+    "months": ("month", 1),
+}
+
+# ---------------- 数据模型 ----------------
+
+
+@dataclass
+class Term:
+    concept_id: str
+    canonical: str
+    type: str
+    synonyms: list[str]
+    auto_status: str = "normalized"
+    scope: str = "hcc"
+    note: str = ""
+
+
+@dataclass
+class FieldValue:
+    field: str
+    raw: str = ""
+    normalized: str = ""
+    status: str = "unknown"
+    source_span: list[int] | None = None
+    source_sentence: str = ""
+    confirm: str = "pending"          # pending / user_confirmed / user_edited / user_unknown
+    candidates: list[dict] = field(default_factory=list)
+    flags: list[str] = field(default_factory=list)
+
+    def to_dict(self):
+        d = asdict(self)
+        return d
+
+
+@dataclass
+class Followup:
+    id: str
+    field: str
+    question: str
+    options: list[str]
+    required: bool = True
+    answer: str = ""
+    answer_status: str = "pending"     # pending / answered / unknown
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass
+class Conflict:
+    field: str
+    message: str
+    spans: list[list[int]] = field(default_factory=list)
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass
+class InputSession:
+    input_id: str
+    raw_text: str
+    fields: dict[str, FieldValue] = field(default_factory=dict)
+    data_available: list[FieldValue] = field(default_factory=list)
+    conflicts: list[Conflict] = field(default_factory=list)
+    followups: list[Followup] = field(default_factory=list)
+    confirmation: dict = field(default_factory=lambda: {"status": "pending", "confirmed_at": None})
+    version: int = 1
+    created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+
+    def field(self, name: str) -> FieldValue:
+        return self.fields.get(name) or FieldValue(field=name)
+
+    def to_dict(self):
+        return {
+            "input_id": self.input_id,
+            "raw_text": self.raw_text,
+            "version": self.version,
+            "created_at": self.created_at,
+            "fields": {k: v.to_dict() for k, v in self.fields.items()},
+            "data_available": [d.to_dict() for d in self.data_available],
+            "conflicts": [c.to_dict() for c in self.conflicts],
+            "followups": [f.to_dict() for f in self.followups],
+            "confirmation": dict(self.confirmation),
+        }
+
+    def pending_required(self) -> list[Followup]:
+        return [f for f in self.followups if f.required and f.answer_status == "pending"]
+
+    def can_confirm(self) -> bool:
+        if self.conflicts:
+            return False
+        d = self.fields.get("disease")
+        if d and d.status in ("out_of_scope", "ambiguous", "unknown", "negated", "historical"):
+            return False
+        return not self.pending_required()
+
+    def confirm(self, status="user_confirmed"):
+        self.confirmation = {"status": status,
+                             "confirmed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+        for f in self.fields.values():
+            if f.confirm == "pending":
+                f.confirm = status
+        self.version += 1
+
+    # ---------------- 落盘 ----------------
+    def save(self, path):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(self.to_dict(), fh, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def load(cls, path):
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        session = cls(input_id=data["input_id"], raw_text=data["raw_text"])
+        session.version = data.get("version", 1)
+        session.created_at = data.get("created_at", session.created_at)
+        session.confirmation = data.get("confirmation") or {"status": "pending", "confirmed_at": None}
+        for name, raw in (data.get("fields") or {}).items():
+            session.fields[name] = FieldValue(**raw)
+        session.data_available = [FieldValue(**d) for d in data.get("data_available") or []]
+        session.conflicts = [Conflict(**c) for c in data.get("conflicts") or []]
+        session.followups = [Followup(**f) for f in data.get("followups") or []]
+        return session
+
+
+# ---------------- 术语表 ----------------
+
+
+def load_terms(path) -> list[Term]:
+    terms = []
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            if not row.get("concept_id"):
+                continue
+            syns = [s.strip() for s in (row.get("synonyms") or "").split("|") if s.strip()]
+            terms.append(Term(
+                concept_id=row["concept_id"].strip(),
+                canonical=row["canonical"].strip(),
+                type=row["type"].strip(),
+                synonyms=syns,
+                auto_status=(row.get("auto_status") or "normalized").strip(),
+                scope=(row.get("scope") or "hcc").strip(),
+                note=(row.get("note") or "").strip(),
+            ))
+    return terms
+
+
+def terms_by_concept(terms) -> dict[str, Term]:
+    return {t.concept_id: t for t in terms}
+
+
+# ---------------- 句子 / 上下文 ----------------
+
+
+def split_sentences(text: str):
+    """保留字符偏移的分句。"""
+    out, start = [], 0
+    for m in re.finditer(r"[。！？；\n]", text):
+        end = m.end()
+        seg = text[start:end].strip()
+        if seg:
+            out.append((seg, start, end))
+        start = end
+    if start < len(text):
+        seg = text[start:].strip()
+        if seg:
+            out.append((seg, start, len(text)))
+    return out
+
+
+def sentence_at(text: str, start: int, end: int):
+    for seg, s, e in split_sentences(text):
+        if s <= start and end <= e:
+            return seg, s, e
+    return text, 0, len(text)
+
+
+def _context(text, start, end):
+    return text[max(0, start - 14):start], text[end:end + 10]
+
+
+def _has(cues, s):
+    return any(c in s for c in cues)
+
+
+def _negated_prefix(prefix: str) -> bool:
+    tail = prefix[-8:]
+    return bool(re.search(r"(非|不是|排除|未见|否认|无|未发现)\s*$", tail))
+
+
+# ---------------- 规则抽取 ----------------
+
+
+class RuleExtractor:
+    def __init__(self, terms_path):
+        self.terms = load_terms(terms_path)
+        self.by_id = terms_by_concept(self.terms)
+
+    # ---- 匹配 ----
+    def _matches(self, text):
+        raw = []
+        low = text.lower()
+        for term in self.terms:
+            for syn in term.synonyms:
+                needle = syn.lower()
+                i = 0
+                while True:
+                    at = low.find(needle, i)
+                    if at < 0:
+                        break
+                    raw.append((at, at + len(syn), term))
+                    i = at + len(needle)
+        raw.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+        # 同一 type 内跳过被更长词覆盖的匹配；不同 type 允许同 span
+        chosen, used = [], {}
+        for s, e, term in raw:
+            spans = used.setdefault(term.type, [])
+            if any(not (e <= a or s >= b) for a, b in spans):
+                continue
+            spans.append((s, e))
+            chosen.append((s, e, term))
+        return chosen
+
+    def _status_for(self, text, start, end, term):
+        prefix, suffix = _context(text, start, end)
+        if term.type == "disease":
+            if _has(HISTORY_CUES, prefix):
+                return "historical"
+            if _has(SUSPECT_CUES, prefix):
+                return "suspected"
+            if _negated_prefix(prefix):
+                return "negated"
+        return term.auto_status
+
+    def extract(self, raw_text: str) -> InputSession:
+        text = (raw_text or "").strip()
+        session = InputSession(input_id="in_" + time.strftime("%Y%m%d") + "_" + uuid.uuid4().hex[:8],
+                               raw_text=text)
+        for name in FIELD_ORDER:
+            session.fields[name] = FieldValue(field=name)
+
+        by_field: dict[str, list[dict]] = {}
+        for start, end, term in self._matches(text):
+            sentence, _, _ = sentence_at(text, start, end)
+            status = self._status_for(text, start, end, term)
+            by_field.setdefault(term.type, []).append({
+                "concept_id": term.concept_id,
+                "canonical": term.canonical,
+                "raw": text[start:end],
+                "status": status,
+                "span": [start, end],
+                "sentence": sentence,
+                "scope": term.scope,
+                "note": term.note,
+            })
+            if term.type == "data":
+                session.data_available.append(FieldValue(
+                    field="data", raw=text[start:end], normalized=term.canonical,
+                    status=status if status != "normalized" else "normalized",
+                    source_span=[start, end], source_sentence=sentence,
+                    candidates=[{"source": "rule", "concept_id": term.concept_id}],
+                ))
+
+        self._resolve_disease(session, by_field.get("disease") or [])
+        self._resolve_treatment(session, by_field.get("treatment") or [])
+        self._resolve_stage(session, by_field.get("stage") or [])
+        self._resolve_outcome(session, by_field.get("outcome") or [])
+        self._resolve_time(session, by_field.get("start") or [], by_field.get("horizon") or [], text)
+        self._resolve_intent(session, text)
+        self._resolve_subject(session, text)
+        self._dedupe_data(session)
+        self._rebuild_followups(session)
+        return session
+
+    # ---- 疾病 ----
+    def _resolve_disease(self, session, cands):
+        f = session.fields["disease"]
+        f.candidates = [dict(c, source="rule") for c in cands]
+        if not cands:
+            return
+        scopes = {c["scope"] for c in cands}
+        concepts = {c["concept_id"] for c in cands}
+        # 明确非 HCC 范围
+        for c in cands:
+            if c["scope"] == "non_hcc":
+                self._set(f, c, "out_of_scope")
+                f.flags.append("首版仅支持 HCC")
+                if "disease.hcc" in concepts:
+                    self._conflict(session, "disease", "同时出现 HCC 与范围外诊断", cands)
+                return
+        hcc_all = [c for c in cands if c["concept_id"] == "disease.hcc"]
+        hcc_pos = [c for c in hcc_all if c["status"] != "negated"]
+        hcc_neg = [c for c in hcc_all if c["status"] == "negated"]
+        # 阳性 HCC 与否定 HCC 同时出现
+        if hcc_pos and hcc_neg:
+            self._conflict(session, "disease", "HCC 既有阳性又有否定表达", cands)
+            f.status = "conflict"
+            f.normalized = "HCC 阳性/否定冲突"
+            f.raw = cands[0]["raw"]
+            f.source_span = cands[0]["span"]
+            f.source_sentence = cands[0]["sentence"]
+            return
+        hcc = hcc_all
+        if hcc:
+            c = hcc[0]
+            status = c["status"]
+            if status == "suspected":
+                self._set(f, c, "suspected", normalized="HCC 疑似")
+                f.flags.append("疑似不能当确诊")
+            elif status == "historical":
+                self._set(f, c, "historical", normalized="HCC 既往史；当前病灶未定")
+                f.flags.append("历史诊断不等于本次")
+            elif status == "negated":
+                self._set(f, c, "negated", normalized="HCC 被否定")
+            else:
+                self._set(f, c, "normalized", normalized="HCC")
+            # 同时出现“肝癌”上位词：保留提示，不改变 HCC 结论
+            for other in cands:
+                if other["concept_id"] == "disease.liver_cancer_unspecified":
+                    f.flags.append("原话同时出现“肝癌”，已由明确 HCC 表达覆盖")
+            return
+        # 无明确 HCC：按上位词/未知/否定取
+        for c in cands:
+            if c["status"] in ("negated", "suspected", "historical"):
+                self._set(f, c, c["status"], normalized=c["canonical"])
+                if c["status"] == "suspected":
+                    f.flags.append("疑似不能当确诊")
+                return
+        c = cands[0]
+        status = "ambiguous" if c["concept_id"] == "disease.liver_cancer_unspecified" else (
+            "unknown" if c["concept_id"] == "disease.liver_lesion_unspecified" else "ambiguous")
+        self._set(f, c, status)
+        f.flags.append("不自动归为 HCC")
+
+    # ---- 治疗 ----
+    def _resolve_treatment(self, session, cands):
+        f = session.fields["treatment"]
+        f.candidates = [dict(c, source="rule") for c in cands]
+        if not cands:
+            return
+        ids = {c["concept_id"] for c in cands}
+        none = ids & {"treatment.none", "treatment.no_surgery"}
+        active = ids - {"treatment.none", "treatment.no_surgery"}
+        if none and active:
+            self._conflict(session, "treatment", "治疗状态冲突（如“未手术”与“已术后”）", cands)
+            f.status = "conflict"
+            f.normalized = "治疗状态冲突，待确认"
+            f.raw = cands[0]["raw"]
+            f.source_span = cands[0]["span"]
+            f.source_sentence = cands[0]["sentence"]
+            return
+        if ids & {"treatment.none", "treatment.no_surgery"}:
+            c = (ids and [x for x in cands if x["concept_id"] in none][0])
+            self._set(f, c, "normalized" if c["concept_id"] == "treatment.none" else "negated")
+            return
+        # 术后 + 具体治疗：保留具体治疗，备注术后
+        specifics = [c for c in cands if c["concept_id"] not in ("treatment.postop",)]
+        if specifics:
+            c = specifics[0]
+            self._set(f, c, c["status"])
+            if any(x["concept_id"] == "treatment.postop" for x in cands):
+                f.flags.append("已术后，治疗类型/时间仍需确认")
+            return
+        c = cands[0]
+        self._set(f, c, "ambiguous" if c["concept_id"] == "treatment.postop" else c["status"],
+                  normalized="治疗后，治疗类型未明确" if c["concept_id"] == "treatment.postop" else None)
+
+    # ---- 阶段 ----
+    def _resolve_stage(self, session, cands):
+        f = session.fields["stage"]
+        f.candidates = [dict(c, source="rule") for c in cands]
+        if not cands:
+            return
+        ids = {c["concept_id"] for c in cands}
+        if "stage.pre_surgery" in ids and ("stage.post_surgery" in ids or "stage.post_pathology_pending" in ids):
+            self._conflict(session, "stage", "术前与术后表达冲突", cands)
+            f.status = "conflict"
+            f.normalized = "术前/术后冲突"
+            f.raw = cands[0]["raw"]
+            f.source_span = cands[0]["span"]
+            f.source_sentence = cands[0]["sentence"]
+            return
+        if "stage.post_pathology_pending" in ids:
+            c = [x for x in cands if x["concept_id"] == "stage.post_pathology_pending"][0]
+            self._set(f, c, "normalized", normalized="治疗后，病理未取得")
+            f.flags.append("病理未取得 ≠ 病理阴性")
+            return
+        c = cands[0]
+        self._set(f, c, "ambiguous" if c["concept_id"] == "stage.post_surgery" else c["status"])
+
+    # ---- 结局 ----
+    def _resolve_outcome(self, session, cands):
+        f = session.fields["outcome"]
+        f.candidates = [dict(c, source="rule") for c in cands]
+        if not cands:
+            return
+        ids = {c["concept_id"] for c in cands}
+        if "outcome.prognosis_unclear" in ids and len(ids) == 1:
+            c = cands[0]
+            self._set(f, c, "unknown", normalized="预测需求未明确")
+            f.flags.append("不生成寿命或概率")
+            return
+        c = cands[0]
+        self._set(f, c, "ambiguous" if c["status"] == "normalized" else c["status"])
+        if c["concept_id"] == "outcome.os":
+            f.flags.append("“生存”需确认是总生存还是其他")
+
+    # ---- 时间 ----
+    def _resolve_time(self, session, starts, horizons, text):
+        f_start = session.fields["start_point"]
+        f_h = session.fields["horizon"]
+        f_d = session.fields["postop_duration"]
+        # 术后 X 年：先记为已术后时长
+        m = re.search(r"术后\s*(一年|1年|两年|2年|三年|3年|五年|5年)", text)
+        if m:
+            val = HORIZON_MONTHS.get(m.group(1))
+            if val:
+                sess, start, end = sentence_at(text, m.start(), m.end())
+                f_d.raw = m.group(0)
+                f_d.normalized = "%d个月" % val
+                f_d.status = "normalized"
+                f_d.source_span = [m.start(), m.end()]
+                f_d.source_sentence = sess
+                f_d.confirm = "pending"
+                if "未来" in text[m.end():m.end() + 8] or "以后" in text[m.end():m.end() + 8]:
+                    f_start.raw = text[m.start():m.end()]
+                    f_start.normalized = "今天"
+                    f_start.status = "normalized"
+                    f_start.source_span = [m.start(), m.end()]
+                    f_start.source_sentence = sess
+                else:
+                    f_start.raw = text[m.start():m.end()]
+                    f_start.normalized = "时间含义未明（已术后 vs 预测术后）"
+                    f_start.status = "ambiguous"
+                    f_start.source_span = [m.start(), m.end()]
+                    f_start.source_sentence = sess
+        # 明确起点
+        for c in starts:
+            if c["status"] == "normalized":
+                self._set(f_start, c, "normalized")
+                break
+        # 范围：跳过“术后三年”里的“三年”
+        for c in horizons:
+            prefix = text[max(0, c["span"][0] - 2):c["span"][0]]
+            if "术后" in prefix and "未来" not in prefix and "以后" not in prefix:
+                continue
+            self._set(f_h, c, "normalized")
+            break
+        # “未来/以后” + 术后时长 → 从今天起算
+        if f_d.status == "normalized" and re.search(r"未来|以后|接下来", text) and f_start.status != "normalized":
+            f_start.raw = f_d.raw
+            f_start.normalized = "今天"
+            f_start.status = "normalized"
+            f_start.source_span = f_d.source_span
+            f_start.source_sentence = f_d.source_sentence
+
+    # ---- 意图 / 主体 ----
+    def _resolve_intent(self, session, text):
+        f = session.fields["intent"]
+        clauses = []
+        for seg, s, _e in split_sentences(text):
+            for m in re.finditer(r"[^，,；;]+", seg):
+                c = m.group(0).strip()
+                if c:
+                    clauses.append(c)
+        cand = [c for c in clauses if re.search(r"想|希望|要|需要|评估|预测|看|是否|能不能|问|了解", c)]
+        if cand:
+            q = max(cand, key=len)
+            f.raw = q
+            f.normalized = q
+            f.status = "normalized"
+            f.source_sentence = q
+        else:
+            f.status = "unknown"
+            f.normalized = "未明确"
+
+    def _resolve_subject(self, session, text):
+        f = session.fields["subject"]
+        m = re.search(r"家属|父亲|母亲|妻子|丈夫|孩子|朋友|家人", text)
+        if m:
+            sess, s, e = sentence_at(text, m.start(), m.end())
+            f.raw = m.group(0)
+            f.normalized = "家属代问"
+            f.status = "ambiguous"
+            f.source_span = [m.start(), m.end()]
+            f.source_sentence = sess
+        elif text:
+            f.normalized = "患者本人"
+            f.status = "normalized"
+
+    def _dedupe_data(self, session):
+        seen, out = set(), []
+        for d in session.data_available:
+            key = (d.normalized, d.status)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(d)
+        session.data_available = out
+
+    # ---- 工具 ----
+    def _set(self, f: FieldValue, c: dict, status=None, normalized=None):
+        f.raw = c.get("raw") or f.raw
+        f.normalized = normalized or c.get("canonical") or f.normalized
+        f.status = status or c.get("status") or "unknown"
+        f.source_span = c.get("span")
+        f.source_sentence = c.get("sentence") or ""
+
+    def _conflict(self, session, field_name, message, cands):
+        spans = [c.get("span") for c in cands if c.get("span")]
+        session.conflicts.append(Conflict(field=field_name, message=message, spans=spans))
+
+    # ---- 追问 ----
+    @staticmethod
+    def _rebuild_followups(session: InputSession):
+        session.followups = []
+        d = session.fields["disease"]
+        if d.status == "ambiguous":
+            session.followups.append(Followup(
+                "q_disease", "disease",
+                "请确认疾病类型：是 HCC、其他类型，还是尚未明确？",
+                ["HCC", "其他类型", "尚未明确", "不知道"]))
+        elif d.status == "suspected":
+            session.followups.append(Followup(
+                "q_disease", "disease",
+                "“疑似 HCC”是否已有确诊依据？目前按疑似记录，不能当确诊。",
+                ["已确诊 HCC", "仍疑似", "已排除 HCC", "不知道"]))
+        elif d.status == "historical":
+            session.followups.append(Followup(
+                "q_disease", "disease",
+                "HCC 是既往史还是本次诊断？当前病灶的性质是什么？",
+                ["既往 HCC，本次未定", "本次 HCC", "本次非 HCC", "不知道"]))
+        elif d.status == "negated":
+            session.followups.append(Followup(
+                "q_disease", "disease",
+                "已排除 HCC 的依据是什么？当前诊断是什么？",
+                ["其他肝脏肿瘤", "良性病变", "仍未明确", "不知道"]))
+        elif d.status == "out_of_scope":
+            session.followups.append(Followup(
+                "q_disease", "disease",
+                "首版只支持 HCC；该诊断不在范围内，需要说明范围限制。",
+                ["返回修改", "仅查看范围说明"]))
+        elif d.status == "conflict":
+            session.followups.append(Followup(
+                "q_disease", "disease",
+                "HCC 的表达前后冲突，请确认以哪一句为准。",
+                ["以阳性为准", "以否定为准", "都不确定", "不知道"]))
+
+        t = session.fields["treatment"]
+        if t.status in ("ambiguous", "conflict"):
+            session.followups.append(Followup(
+                "q_treatment", "treatment",
+                "请确认治疗类型（切除/TACE/消融/系统治疗）、是否完成、是否根治性？",
+                ["已切除（根治性）", "已切除（是否根治不明）", "TACE/消融/系统治疗", "尚未治疗", "不知道"]))
+        s = session.fields["start_point"]
+        if s.status in ("unknown", "ambiguous"):
+            session.followups.append(Followup(
+                "q_start", "start_point",
+                "预测范围从手术日、治疗日开始，还是从今天起算？",
+                ["手术日", "治疗日", "今天", "不知道"]))
+        o = session.fields["outcome"]
+        if o.status in ("unknown", "ambiguous", "conflict"):
+            session.followups.append(Followup(
+                "q_outcome", "outcome",
+                "想预测的是总生存（OS）、复发（RFS/早期复发），还是其他结局？",
+                ["总生存 OS", "复发 RFS", "其他", "不知道"]))
+        it = session.fields["intent"]
+        if it.status == "unknown":
+            session.followups.append(Followup(
+                "q_intent", "intent",
+                "你想回答的核心问题是什么？（例如：这个模型能不能用于术前判断 1 年内复发）",
+                ["自定义输入", "不知道"]))
+        sub = session.fields["subject"]
+        if sub.status == "ambiguous":
+            session.followups.append(Followup(
+                "q_subject", "subject",
+                "这段信息是患者本人提供，还是家属代问？",
+                ["患者本人", "家属代问", "不知道"], required=False))
+        if session.conflicts:
+            fields = "、".join(sorted({c.field for c in session.conflicts}))
+            session.followups.append(Followup(
+                "q_conflict", "conflict",
+                "以下字段存在前后冲突：%s。请确认以哪一句为准。" % fields,
+                ["逐项确认", "不知道"]))
+
+    # ---- 确认后映射到 Agent v0.6 的 scenario ----
+    @staticmethod
+    def to_agent_scenario(session: InputSession, paper_text=""):
+        d = session.fields["disease"]
+        t = session.fields["treatment"]
+        s = session.fields["stage"]
+        o = session.fields["outcome"]
+        start = session.fields["start_point"]
+        h = session.fields["horizon"]
+        intent = session.fields["intent"]
+        postop = session.fields["postop_duration"]
+
+        parts = []
+        if d.normalized and d.status != "unknown":
+            parts.append("疾病：%s" % d.normalized)
+        if t.normalized and t.status != "unknown":
+            parts.append("治疗：%s" % t.normalized)
+        if s.normalized and s.status != "unknown":
+            parts.append("阶段：%s" % s.normalized)
+        if postop.status == "normalized":
+            parts.append("已术后 %s" % postop.normalized)
+        if session.data_available:
+            got = [x.normalized for x in session.data_available if x.status == "normalized"]
+            miss = [x.normalized for x in session.data_available if x.status != "normalized"]
+            if got:
+                parts.append("已有资料：%s" % "、".join(got))
+            if miss:
+                parts.append("缺失资料：%s" % "、".join(miss))
+        patient = "；".join(parts) or "未明确"
+        if len(patient) < 8:
+            patient = (patient + "（需补充患者信息）").strip()
+
+        task = intent.normalized if intent.status == "normalized" else "评估该患者在该时点的模型适用性"
+        if len(task) < 8:
+            task = (task + "（需补充具体问题）").strip()
+
+        # 时点枚举
+        if s.status == "normalized" and "术前" in s.normalized:
+            tp = "pre_surgery"
+        elif s.status in ("normalized", "ambiguous") and ("术后" in (s.normalized or "") or "病理" in (s.normalized or "")):
+            tp = "post_surgery"
+        elif t.normalized in ("TACE", "系统治疗", "消融"):
+            tp = "pre_treatment"
+        else:
+            tp = "未明确"
+
+        outcome = o.normalized or "未明确"
+        if h.status == "normalized":
+            outcome = "%s（%s）" % (outcome, h.normalized)
+        given = [x.normalized for x in session.data_available if x.status == "normalized"]
+        missing = [x.normalized for x in session.data_available if x.status != "normalized"]
+
+        scenario = {
+            "task_zh": task,
+            "patient_summary_zh": patient,
+            "use_timepoint": tp,
+            "outcome_type": outcome,
+            "inputs_given": "、".join(given),
+            "inputs_missing": "、".join(missing),
+        }
+        if paper_text:
+            scenario["paper_text"] = paper_text
+        return scenario
+
+
+# ---------------- AI 候选层 ----------------
+
+class AIProvider(Protocol):
+    def extract(self, raw_text: str, session: InputSession) -> list[dict]:
+        """返回 [{field, concept_id, raw, span?}]，只作为候选。"""
+
+
+PROTECTED = {"negated", "historical", "suspected", "out_of_scope", "conflict", "normalized"}
+
+
+def apply_ai_candidates(session: InputSession, candidates, terms):
+    """AI 候选只补 unknown/ambiguous；不覆盖否定/既往/疑似/超范围/已归一。"""
+    by_id = terms_by_concept(terms)
+    for c in candidates or []:
+        field_name = c.get("field")
+        concept_id = c.get("concept_id")
+        if field_name not in session.fields or concept_id not in by_id:
+            continue
+        f = session.fields[field_name]
+        if f.status in PROTECTED:
+            f.candidates.append(dict(c, source="ai", accepted=False,
+                                     reason="规则已给出%s，AI候选不覆盖" % f.status))
+            continue
+        term = by_id[concept_id]
+        if field_name == "disease" and term.concept_id == "disease.hcc":
+            # 明确 HCC 已由规则归一（normalized，受保护）；其余情况 AI 一律不得提成 HCC
+            f.candidates.append(dict(c, source="ai", accepted=False,
+                                     reason="肝癌/肝脏肿瘤/恶性肿瘤不得由AI自动归一为HCC"))
+            continue
+        f.candidates.append(dict(c, source="ai", accepted=True))
+        f.normalized = term.canonical
+        f.status = "ambiguous"          # AI 候选仍需医生确认
+        f.flags.append("AI候选，需医生确认")
+        if c.get("raw") and not f.raw:
+            f.raw = c["raw"]
+    RuleExtractor._rebuild_followups(session)
+    return session
+
+
+def extract_with_ai(raw_text, terms_path, provider: AIProvider | None = None):
+    rules = RuleExtractor(terms_path)
+    session = rules.extract(raw_text)
+    if provider is not None:
+        try:
+            apply_ai_candidates(session, provider.extract(raw_text, session), rules.terms)
+        except Exception as exc:  # noqa: BLE001
+            # AI 失败不阻塞规则结果，也不产生“冲突”；只记录提示
+            session.fields["disease"].flags.append(
+                "AI 提取失败，已保留规则结果：%s" % type(exc).__name__)
+    return session

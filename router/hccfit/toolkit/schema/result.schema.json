@@ -1,0 +1,114 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HCC paper search result",
+  "type": "object",
+  "required": ["query_id", "input_scenario", "search_scenario", "route", "confidence", "assumptions", "papers", "meta", "empty_reason"],
+  "properties": {
+    "query_id": {"type": "string"},
+    "input_scenario": {
+      "type": "object",
+      "description": "用户/前端原样输入；只含真正提供的字段，不含系统默认值"
+    },
+    "search_scenario": {
+      "type": "object",
+      "description": "系统实际用于检索的解释；含补全字段，只用于检索，不是患者数据",
+      "required": ["outcome", "time_zero", "horizon_months"],
+      "properties": {
+        "disease": {"type": "string"},
+        "treatment_state": {"type": "string"},
+        "time_zero": {"type": "string"},
+        "outcome": {"type": "string"},
+        "horizon_months": {"type": "integer"},
+        "etiology": {"type": "string"},
+        "variables": {"type": "array", "items": {"type": "string"}},
+        "year_min": {"type": "integer"}
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "description": "兼容字段：等同 input_scenario"
+    },
+    "route": {
+      "type": "object",
+      "required": ["mode", "strategy", "history", "reason"],
+      "properties": {
+        "mode": {"type": "string"},
+        "strategy": {"type": "string"},
+        "history": {"type": "array", "items": {"type": "string"}},
+        "reason": {"type": "string"}
+      }
+    },
+    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+    "assumptions": {"type": "array", "items": {"type": "string"}},
+    "coverage_gap": {"type": "boolean"},
+    "shortfall_reason": {"type": ["string", "null"]},
+    "ambiguity": {"type": "boolean"},
+    "context_missing": {"type": "array", "items": {"type": "string"}},
+    "agent_trace": {"type": "array", "items": {"type": "object"}},
+    "interpretations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "rationale", "scenario", "is_primary", "searched", "confidence"],
+        "properties": {
+          "id": {"type": "string"},
+          "label": {"type": "string"},
+          "rationale": {"type": "string"},
+          "scenario": {"type": "object"},
+          "is_primary": {"type": "boolean"},
+          "searched": {"type": "boolean"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
+        }
+      }
+    },
+    "papers": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["title", "scores", "why", "risk", "verify", "read"],
+        "anyOf": [{"required": ["pmid"]}, {"required": ["doi"]}],
+        "properties": {
+          "pmid": {"type": "string"},
+          "doi": {"type": "string"},
+          "title": {"type": "string"},
+          "journal": {"type": "string"},
+          "year": {"type": "integer"},
+          "oa_url": {"type": "string"},
+          "scores": {
+            "type": "object",
+            "required": ["M", "E", "R"],
+            "properties": {
+              "M": {"type": "number", "minimum": 0, "maximum": 1},
+              "E": {"type": "number", "minimum": 0, "maximum": 1},
+              "R": {"type": "number", "minimum": 0, "maximum": 1}
+            }
+          },
+          "pareto_layer": {"type": "integer"},
+          "cluster": {"type": "string"},
+          "variable_overlap": {"type": "number", "minimum": 0, "maximum": 1},
+          "why": {"type": "array", "items": {"type": "string"}},
+          "risk": {"type": "array", "items": {"type": "string"}},
+          "verify": {"type": "array", "items": {"type": "string"}},
+          "read": {"type": "array", "items": {"type": "string"}},
+          "abstract_snippet": {"type": "string"}
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "calls": {"type": "integer"},
+        "latency_ms": {"type": "integer"},
+        "relaxed": {"type": "array", "items": {"type": "string"}},
+        "candidates": {"type": "integer"},
+        "k_requested": {"type": "integer"},
+        "returned": {"type": "integer"},
+        "coverage": {"type": "number"},
+        "errors": {"type": "integer"},
+        "partial": {"type": "boolean"}
+      }
+    },
+    "empty_reason": {"type": ["string", "null"], "enum": ["hard_constraints_no_match", "insufficient_matches", "upstream_unavailable", null]}
+  }
+}
