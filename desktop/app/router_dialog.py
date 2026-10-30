@@ -76,12 +76,16 @@ class RouterDialog(QDialog):
         self.k.setValue(8)
         self.search_btn = QPushButton("一键检索候选")
         self.search_btn.clicked.connect(self.search)
+        self.fallback_btn = QPushButton("改用内置引擎重试")
+        self.fallback_btn.setVisible(False)
+        self.fallback_btn.clicked.connect(self._retry_builtin)
         row.addWidget(self.sp_key, 2)
         row.addWidget(self.filter_agent, 2)
         row.addWidget(self.strategy)
         row.addWidget(QLabel("k"))
         row.addWidget(self.k)
         row.addWidget(self.search_btn)
+        row.addWidget(self.fallback_btn)
         lay.addLayout(row)
 
         self.status = QLabel("只做候选发现；题录/摘要不是全文，S2 四维核查仍需 PDF。"
@@ -162,6 +166,7 @@ class RouterDialog(QDialog):
         if engine == "http" and not self.url.text().strip():
             QMessageBox.warning(self, "缺少地址", "外部服务模式需要填写 Router 地址。")
             return
+        self.fallback_btn.setVisible(False)
         self.search_btn.setEnabled(False)
         self.status.setText("检索中…（%s）" % ("内置引擎，无需服务" if engine == "builtin" else "外部服务"))
         self.thread = QThread(self)
@@ -179,6 +184,14 @@ class RouterDialog(QDialog):
         self.worker.failed.connect(self.thread.quit)
         self.thread.finished.connect(self._thread_done)
         self.thread.start()
+
+    def _retry_builtin(self):
+        """外部服务连不上时，一键切回内置引擎并立即重试。"""
+        idx = self.engine.findData("builtin")
+        if idx >= 0:
+            self.engine.setCurrentIndex(idx)      # 会触发 _refresh_engine
+        self.fallback_btn.setVisible(False)
+        self.search()
 
     def _thread_done(self):
         if self.thread is not None:
@@ -227,6 +240,17 @@ class RouterDialog(QDialog):
         self.search_btn.setEnabled(True)
         self.status.setText("检索失败：%s" % msg)
         self.warn.setPlainText(msg)
+        # 外部服务连不上（10061/拒绝连接）：给一个“一键切内置”的出口
+        if self.current_engine() == "http" and msg.startswith("连不上"):
+            try:
+                from app.router_engine import engine_status
+                st = engine_status()
+            except Exception:
+                st = {"available": False}
+            self.fallback_btn.setVisible(bool(st.get("available")))
+            if st.get("available"):
+                self.status.setText("外部 Router 没启动（%s）。可点“改用内置引擎重试”，"
+                                    "或先启动 Router 服务。" % self.url.text().strip())
 
     # ---------------- 候选操作 ----------------
     def _row_paper(self):

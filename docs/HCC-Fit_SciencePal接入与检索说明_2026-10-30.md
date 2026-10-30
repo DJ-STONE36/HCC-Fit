@@ -212,6 +212,7 @@ POST /api/thread/{thread_id}/agent/start
 | `422` | 手填了不可用模型名 | 清空 `SCIENCEPAL_MODEL`（用平台默认），或从 available-models 复制 id |
 | 运行完成但正文为空 | 流订阅从尾部、`tokens_used=0`、工具阶段结束就停 | 确认 `after_index=0`；看 `sp_raw/stream_*.json`；换 Agent 提示词要求“最后输出 JSON/正文” |
 | Agent 追问（asked） | 提示词让 Agent 反问 | 提示词明确“不确定写 unknown，不要反问”；或换 Agent |
+| 外部 Router 报 `WinError 10061` / “目标计算机积极拒绝” | 该地址没有服务在监听（通常是选了“外部 Router 服务”但没启动） | 对话里会提示“改用内置引擎重试”，一键切回；或双击包根目录 `启动 Router 服务.bat`（需先装 requirements） |
 
 ---
 

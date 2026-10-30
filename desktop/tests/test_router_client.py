@@ -56,6 +56,25 @@ def main():
     finally:
         urllib.request.urlopen = orig
     assert captured["headers"].get("x-sciencepal-api-key") == "sp-demo"
+
+    # 10061：目标端口没有服务在监听 → 要给出可操作提示，而不是裸 URLError
+    import urllib.error
+
+    def refuse(_req, timeout=0):
+        raise urllib.error.URLError(ConnectionRefusedError(10061, "由于目标计算机积极拒绝，无法连接。"))
+
+    urllib.request.urlopen = refuse
+    try:
+        try:
+            RouterClient("http://127.0.0.1:8080").search(payload, "fast", 3)
+        except RouterError as exc:
+            msg = str(exc)
+            assert "连不上" in msg and "内置引擎" in msg, msg
+        else:
+            raise AssertionError("端口未监听时应报连接错误")
+    finally:
+        urllib.request.urlopen = orig
+
     print("PASS router client mapping")
     return 0
 

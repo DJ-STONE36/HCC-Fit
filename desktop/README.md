@@ -123,6 +123,8 @@ set HCCFIT_ROUTER_URL=http://127.0.0.1:8080
 开发态内置引擎默认找包内同级 `router/`；也可用 `HCCFIT_ROUTER_DIR` 指向别处。
 外部服务**默认不鉴权**（服务端 `HCCFIT_ROUTER_TOKEN` 留空即可）；界面不再要求填 token，仅远程部署时用环境变量配置。
 
+> 如果外部服务报“目标计算机积极拒绝（10061）”，说明 8080 上没有服务：对话里点“改用内置引擎重试”，或双击包根目录的 `启动 Router 服务.bat`。
+
 ![候选论文（内置 Router，一键检索）](docs/router_dialog.png)
 
 测试：

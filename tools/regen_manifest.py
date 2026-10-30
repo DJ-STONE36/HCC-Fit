@@ -5,8 +5,8 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PREFIXES = ("HANDOFF.md", "启动 HCC-Fit.bat", "desktop", "desktop_build", "docs",
-            "router", "tools")
+PREFIXES = ("HANDOFF.md", "启动 HCC-Fit.bat", "启动 Router 服务.bat", "desktop",
+            "desktop_build", "docs", "router", "tools")
 SKIP_DIRS = {"__pycache__", "dist", "build", "smoke_out", "smoke_data", "eggs"}
 SKIP_PREFIX = ("desktop/tests/_tmp",)
 

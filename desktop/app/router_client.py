@@ -148,7 +148,21 @@ class RouterClient:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")[:400]
-            raise RouterError("Router HTTP %s: %s" % (exc.code, body))
+            hint = {
+                401: "Router token 不对（或服务端启用了 HCCFIT_ROUTER_TOKEN）",
+                404: "接口不存在：地址应指向 Router 根地址（不是 /v1/search）",
+                422: "参数被拒绝（k 需 1–8、strategy 需 fast/balanced/auto）",
+                500: "Router 内部错误，看服务端日志",
+            }.get(exc.code, "HTTP %s" % exc.code)
+            raise RouterError("外部 Router 返回错误：%s；%s" % (hint, body))
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
+            reason = getattr(exc, "reason", exc)
+            raise RouterError(
+                "连不上 Router 服务（%s）：%s。\n"
+                "这表示该地址没有服务在监听（WinError 10061 = 目标拒绝连接）。\n"
+                "两种办法：① 改用“内置引擎（无需启动服务）”；"
+                "② 先启动 Router（router 目录运行 uvicorn hccfit.app:app --port 8080）再试。"
+                % (self.base_url, reason))
         except Exception as exc:  # noqa: BLE001
             raise RouterError("%s: %s" % (type(exc).__name__, exc))
 
