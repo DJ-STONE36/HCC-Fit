@@ -331,6 +331,10 @@ class MainWindow(QMainWindow):
         top.addWidget(self.pdf_btn)
         top.addWidget(self.json_btn)
         top.addStretch(1)
+        self.show_raw = QCheckBox("显示原始返回")
+        self.show_raw.setToolTip("默认隐藏；只有需要排错/审计时再显示。原始内容始终保存在 visit.json。")
+        self.show_raw.toggled.connect(self._apply_raw_visibility)
+        top.addWidget(self.show_raw)
         v.addLayout(top)
 
         self.tabs = QTabWidget()
@@ -384,12 +388,13 @@ class MainWindow(QMainWindow):
         mv2.addWidget(self.misc)
         self.tabs.addTab(misc_page, "论文 / 方案 / 期望")
 
-        raw_page = QWidget()
-        rv = QVBoxLayout(raw_page)
+        self.raw_page = QWidget()
+        rv = QVBoxLayout(self.raw_page)
         self.raw = QPlainTextEdit()
         self.raw.setReadOnly(True)
+        self.raw.setPlaceholderText("原始返回默认隐藏；需要审计/排错时勾选右上角“显示原始返回”。")
         rv.addWidget(self.raw)
-        self.tabs.addTab(raw_page, "原始返回")
+        # 不默认 addTab：由 _apply_raw_visibility 决定是否显示
 
         sup_page = QWidget()
         sv = QVBoxLayout(sup_page)
@@ -421,6 +426,7 @@ class MainWindow(QMainWindow):
         self.supplement_btn.setEnabled(False)
         self.supplement_btn.clicked.connect(self.start_supplement_run)
         sv.addWidget(self.supplement_btn)
+        self.supplement_page = sup_page
         self.tabs.addTab(sup_page, "补充资料")
 
         v.addWidget(self.tabs, 1)
@@ -927,6 +933,18 @@ class MainWindow(QMainWindow):
         self._validate_supplement()
 
     # ---------------- 渲染 ----------------
+    def _apply_raw_visibility(self, checked=None):
+        """原始返回页：默认不显示，勾选后才插入到“补充资料”之前。"""
+        if checked is None:
+            checked = self.show_raw.isChecked()
+        idx = self.tabs.indexOf(self.raw_page)
+        if checked and idx < 0:
+            ins = self.tabs.indexOf(self.supplement_page)
+            self.tabs.insertTab(ins if ins >= 0 else self.tabs.count(),
+                                self.raw_page, "原始返回")
+        elif not checked and idx >= 0:
+            self.tabs.removeTab(idx)
+
     def _render(self, v: dict):
         domain = v.get("domain") or {}
         dtext = {
@@ -948,7 +966,12 @@ class MainWindow(QMainWindow):
         repaired = any(a.get("stage") == "hcc_original" for a in (v.get("raw_answers") or []))
         self.repair_note.setVisible(repaired)
         if repaired:
-            self.repair_note.setText("二次 JSON 修复已生效：首次返回的 Markdown 已保留在「原始返回」。")
+            self.repair_note.setText("二次 JSON 修复已生效：首次返回的 Markdown 已保留在「原始返回」"
+                                     "（已自动显示；平时默认隐藏）。")
+        if (fallback or repaired) and not self.show_raw.isChecked():
+            self.show_raw.setChecked(True)      # 降级/修复时自动展示，便于人工判读
+        else:
+            self._apply_raw_visibility()
 
         summary = str((v.get("integrated") or {}).get("summary_zh") or "")
         if summary.strip():
@@ -1136,6 +1159,8 @@ class MainWindow(QMainWindow):
         self.given.setText(s.value("given", ""))
         self.missing.setText(s.value("missing", ""))
         self.split_papers.setChecked(s.value("split_papers", "false") in (True, "true", "1", 1))
+        self.show_raw.setChecked(s.value("show_raw", "false") in (True, "true", "1", 1))
+        self._apply_raw_visibility()
         tp = s.value("timepoint", "pre_surgery")
         ti = self.timepoint.findData(tp)
         if ti >= 0:
@@ -1151,6 +1176,7 @@ class MainWindow(QMainWindow):
         s.setValue("missing", self.missing.text())
         s.setValue("timepoint", self.timepoint.currentData())
         s.setValue("split_papers", self.split_papers.isChecked())
+        s.setValue("show_raw", self.show_raw.isChecked())
         # 不保存 Key
 
     def closeEvent(self, event):
