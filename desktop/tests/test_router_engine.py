@@ -242,6 +242,25 @@ def case_copy_doi_multi():
     return "复制 DOI 支持多选（换行分隔）"
 
 
+
+def case_button_click_opens_selected():
+    """回归：clicked 会带 checked=False，不能被当成 papers=False。"""
+    from app import router_dialog as rd
+    dlg = _dialog_with_papers()
+    opened = []
+    orig = rd.open_external_url
+    rd.open_external_url = lambda u: (opened.append(u) or (True, "test"))
+    try:
+        dlg.table.clearSelection()
+        dlg.table.selectRow(1)
+        dlg.full_btn.click()
+    finally:
+        rd.open_external_url = orig
+        dlg.close()
+    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/222/"], opened
+    return "真实按钮点击也能打开选中行"
+
+
 def case_open_external_fallback():
     import os
     import webbrowser
@@ -323,6 +342,7 @@ def main():
     check("后台线程：外部 HTTP", case_worker_http)
     check("对话框只有内置引擎", case_dialog)
     check("打开链接（选中行）", case_open_selected_row)
+    check("打开链接（按钮点击）", case_button_click_opens_selected)
     check("打开链接（多选）", case_open_multi_selected)
     check("打开链接（勾选兜底）", case_open_checked_fallback)
     check("复制 DOI（多选）", case_copy_doi_multi)
