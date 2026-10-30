@@ -130,10 +130,11 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
   勾选 **“只看 PMC 免费全文”** 会过滤掉仅摘要候选（会多取一些再筛，返回可能少于 k）；
 - 打开/复制：**选中哪篇就开哪篇**；多选（Ctrl/Shift 或勾选）会同时打开多个网页 / 复制多条链接；
   “复制 DOI”同理（多选每行一个）；没选行时按勾选处理，未勾选才退回第一篇；
-- 打开链接顺序：**直接 `msedge.exe "URL"`（不依赖 URL 关联，已有实例会 handoff）**
-  → ShellExecute（验证 Edge 窗口）→ explorer → Qt → webbrowser；
-  只统计 **msedge.exe 的窗口**（避免 WebView2 误判），成功/已有窗口都会把 Edge 提到前台；
-  失败弹窗给出**失败原因**并复制链接；每次尝试记到 `AppLocalData/logs/links.log`
+- 打开链接顺序：**直接 `msedge.exe "URL"`（显式空句柄；已有实例 handoff）**
+  → ShellExecute → explorer → Qt/webbrowser（后两者也要看到窗口才算成功）；
+  只统计 **msedge.exe 的窗口**；成功后还原/置前；
+  失败弹窗给出**失败原因**并复制链接；每次尝试记到 `AppLocalData/logs/links.log`；
+  排错：`HCC-Fit.exe --open-url "<URL>"` 会弹窗显示结果
   ShellExecute / Qt / webbrowser；候选表底部还有 **“复制链接”**，浏览器没弹出来时可手动粘贴；
 - 勾选候选后保存为 `router_candidates_*.md` 并加入论文列表；
 - **这只是题录/摘要，不是全文**；S2 四维核查仍需 PDF 或正文；

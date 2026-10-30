@@ -170,7 +170,10 @@ def _launch_explorer(url: str) -> tuple[bool, str]:
         return False, "explorer: 仅 Windows"
     before = _browser_window_count()
     try:
-        subprocess.Popen(["explorer.exe", url], close_fds=True)
+        subprocess.Popen(
+            ["explorer.exe", url], close_fds=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
     except Exception as exc:  # noqa: BLE001
         return False, "explorer: %s" % exc
     if _wait_browser_window(before, 2.5):
@@ -183,34 +186,57 @@ def _launch_default_browser(url: str) -> tuple[bool, str]:
     exe = browser_exe()
     if not exe:
         return False, "没读到默认浏览器"
+    import tempfile
+    err_path = os.path.join(tempfile.gettempdir(), "hccfit_edge_err.log")
     try:
-        proc = subprocess.Popen([exe, url], close_fds=True)
+        err_fh = open(err_path, "ab")
+    except Exception:  # noqa: BLE001
+        err_fh = subprocess.DEVNULL
+    try:
+        proc = subprocess.Popen(
+            [exe, url], close_fds=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=err_fh if hasattr(err_fh, "write") else subprocess.DEVNULL)
     except Exception as exc:  # noqa: BLE001
         return False, "browser: %s" % exc
     try:
         code = proc.wait(timeout=2.0)
     except subprocess.TimeoutExpired:
         return True, "browser"           # 还活着：窗口已起来
+    finally:
+        try:
+            if hasattr(err_fh, "close"):
+                err_fh.close()
+        except Exception:  # noqa: BLE001
+            pass
     if code == 0:
         return True, "browser(handoff)"  # 交给已有实例后正常退出
     return False, "%s（exit=%d）" % (EXIT_PREFIX, code)
 
 
-def _log_attempt(url: str, ok: bool, how: str) -> None:
+_last_attempts: list[str] = []
+
+
+def _note(msg: str) -> None:
+    _last_attempts.append(str(msg))
+
+
+def _log_attempt(url: str, ok: bool, how: str, detail: str = "") -> None:
     try:
         from app import paths  # 延迟导入，避免循环
         d = paths.app_data_dir() / "logs"
         d.mkdir(parents=True, exist_ok=True)
         with open(d / "links.log", "a", encoding="utf-8") as fh:
-            fh.write("%s\t%s\t%s\t%s\n" % (
-                time.strftime("%Y-%m-%d %H:%M:%S"), "OK" if ok else "FAIL", how, url))
+            fh.write("%s\t%s\t%s\t%s\t%s\n" % (
+                time.strftime("%Y-%m-%d %H:%M:%S"), "OK" if ok else "FAIL", how, url, detail))
     except Exception:  # noqa: BLE001
         pass
 
 
 def open_external_url(url: str) -> tuple[bool, str]:
+    _last_attempts.clear()
     ok, how = _open_external_url(url)
-    _log_attempt(url, ok, how)
+    _log_attempt(url, ok, how, " ; ".join(_last_attempts))
     return ok, how
 
 
@@ -221,9 +247,12 @@ def _open_external_url(url: str) -> tuple[bool, str]:
         return False, "空链接"
 
     errors: list[str] = []
+    _note("browser_exe=%r" % browser_exe())
+    _note("windows_before=%d" % _browser_window_count())
 
     # 1) 直接启动默认浏览器 exe + URL（新窗口/新标签页都能走，不依赖 URL 关联）
     ok, how = _launch_default_browser(url)
+    _note("direct=%s %s" % (ok, how))
     if ok:
         _focus_browser_window()
         return True, how
@@ -233,6 +262,7 @@ def _open_external_url(url: str) -> tuple[bool, str]:
     before = _browser_window_count()
     try:
         os.startfile(url)  # type: ignore[attr-defined]
+        _note("startfile=returned before=%d" % before)
         if before > 0:
             _focus_browser_window()
             return True, "startfile(existing)"
@@ -249,27 +279,95 @@ def _open_external_url(url: str) -> tuple[bool, str]:
         return True, how
     errors.append(how)
 
-    # 4) Qt
+    # 4) Qt（没有 QApplication 时跳过；返回 True 也不代表真的打开）
     try:
-        if QDesktopServices.openUrl(QUrl(url)):
+        if QApplication.instance() is None:
+            raise RuntimeError("无 QApplication")
+        before_qt = _browser_window_count()
+        if QDesktopServices.openUrl(QUrl(url)) and _wait_browser_window(before_qt, 2.0):
             return True, "qt"
-        errors.append("qt: 返回 False")
+        errors.append("qt: 未出现窗口")
     except Exception as exc:  # noqa: BLE001
         errors.append("qt: %s" % exc)
 
-    # 5) webbrowser
+    # 5) webbrowser（同样要看窗口）
     try:
-        if webbrowser.open(url):
+        before_wb = _browser_window_count()
+        if webbrowser.open(url) and _wait_browser_window(before_wb, 2.0):
             return True, "webbrowser"
-        errors.append("webbrowser: 返回 False")
+        errors.append("webbrowser: 未出现窗口")
     except Exception as exc:  # noqa: BLE001
         errors.append("webbrowser: %s" % exc)
 
     try:
-        QApplication.clipboard().setText(url)
+        if QApplication.instance() is not None:   # 没有 QApplication 时不能碰剪贴板
+            QApplication.clipboard().setText(url)
     except Exception:  # noqa: BLE001
         pass
     summary = "；".join(errors[-4:])
     if errors and errors[0].startswith(EXIT_PREFIX) and EXIT_PREFIX not in summary:
         summary = errors[0] + "；" + summary
     return False, summary
+
+
+def diagnostic_variants(url: str) -> list[tuple[str, str]]:
+    """逐个尝试不同的启动方式，返回 [(方式, 结果)]，用于定位 frozen exe 下 exit=21。"""
+    import tempfile
+    exe = browser_exe()
+    results: list[tuple[str, str]] = []
+
+    def _try(name, func):
+        try:
+            results.append((name, str(func())))
+        except Exception as exc:  # noqa: BLE001
+            results.append((name, "%s: %s" % (type(exc).__name__, exc)))
+
+    def _poll(proc, wait=1.5):
+        try:
+            return "exit=%s" % proc.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            return "alive"
+
+    err = open(os.path.join(tempfile.gettempdir(), "hccfit_variants.log"), "ab")
+
+    def _popen(flags=0):
+        return _poll(subprocess.Popen(
+            [exe, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=err, creationflags=flags))
+
+    _try("popen", lambda: _popen(0))
+    _try("popen_breakaway", lambda: _popen(0x01000000))     # CREATE_BREAKAWAY_FROM_JOB
+    _try("popen_newgroup", lambda: _popen(0x00000200))      # CREATE_NEW_PROCESS_GROUP
+
+    def _shellexe():
+        import ctypes
+        r = ctypes.windll.shell32.ShellExecuteW(None, "open", exe, url, None, 1)
+        return "ret=%d" % r
+
+    _try("ShellExecuteW(exe)", _shellexe)
+
+    def _shellurl():
+        import ctypes
+        r = ctypes.windll.shell32.ShellExecuteW(None, "open", url, None, None, 1)
+        return "ret=%d" % r
+
+    _try("ShellExecuteW(url)", _shellurl)
+
+    def _cmdstart():
+        return _poll(subprocess.Popen(
+            ["cmd.exe", "/c", "start", "", exe, url],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err))
+
+    _try("cmd start exe", _cmdstart)
+
+    def _rundll():
+        return _poll(subprocess.Popen(
+            ["rundll32.exe", "url.dll,FileProtocolHandler", url],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err))
+
+    _try("rundll32", _rundll)
+    try:
+        err.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return results

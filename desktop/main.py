@@ -133,8 +133,29 @@ def _open_url(url: str) -> int:
     """排错用：HCC-Fit.exe --open-url <URL>，结果写 logs/links.log。"""
     from app import links
     app = _make_app()
+    print("EXE", links.browser_exe())
+    try:
+        from app import paths
+        d = paths.app_data_dir() / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        keys = ("TEMP", "TMP", "PATH", "PYTHONHOME", "PYTHONPATH",
+                "USERPROFILE", "LOCALAPPDATA", "APPDATA", "SystemRoot")
+        with open(d / "env.txt", "w", encoding="utf-8") as fh:
+            import ctypes
+            fh.write("is_admin=%r\n" % bool(ctypes.windll.shell32.IsUserAnAdmin()))
+            fh.write("exe=%r\ncwd=%r\nfrozen=%r\n_MEIPASS=%r\n" % (
+                sys.executable, os.getcwd(), getattr(sys, "frozen", False),
+                getattr(sys, "_MEIPASS", None)))
+            for k in keys:
+                v = os.environ.get(k, "")
+                fh.write("%s=%s\n" % (k, v[:300] if k == "PATH" else v))
+    except Exception as exc:  # noqa: BLE001
+        print("ENV DUMP FAIL", exc)
     ok, how = links.open_external_url(url)
     print("OPEN", "OK" if ok else "FAIL", how)
+    if "--quiet" in sys.argv:
+        return 0 if ok else 2
+    app = _make_app()
     from PySide6.QtWidgets import QMessageBox
     QMessageBox.information(
         None, "打开链接测试",
@@ -144,6 +165,13 @@ def _open_url(url: str) -> int:
 
 
 def main():
+    if "--open-variants" in sys.argv:
+        idx = sys.argv.index("--open-variants")
+        url = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""
+        from app import links
+        for name, res in links.diagnostic_variants(url):
+            print("VARIANT", name, res)
+        return 0
     if "--open-url" in sys.argv:
         idx = sys.argv.index("--open-url")
         url = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""

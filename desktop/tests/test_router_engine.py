@@ -345,6 +345,8 @@ def case_open_external_fallback():
     links._launch_default_browser = lambda _u: (False, "no browser")
     links._launch_explorer = lambda _u: (False, "explorer: test")
     links._browser_window_count = lambda: 1      # 已有浏览器窗口 → 跳过 startfile 验证
+    orig_wait = links._wait_browser_window
+    links._wait_browser_window = lambda before, timeout=2.0: True   # webbrowser 也验证窗口
     os.startfile = lambda _u: (_ for _ in ()).throw(OSError("blocked"))
     QDesktopServices.openUrl = staticmethod(lambda _u: False)
     webbrowser.open = lambda _u: True
@@ -354,6 +356,7 @@ def case_open_external_fallback():
         links._launch_default_browser = orig_launch
         links._launch_explorer = orig_explorer
         links._browser_window_count = orig_count
+        links._wait_browser_window = orig_wait
         os.startfile = orig_start
         QDesktopServices.openUrl = orig_qt
         webbrowser.open = orig_wb
