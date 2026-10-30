@@ -5,6 +5,9 @@
 
 算法检索 + SciencePal filter 的可部署 HTTP 服务。
 
+> 接入细节（Agent 调用规则、fast vs balanced、五阶段、错误码）见
+> [`docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`](../docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md)。
+
 ## 快速启动
 
 ```bash
@@ -12,11 +15,12 @@ python -m pip install -r requirements.txt
 
 export SCIENCEPAL_API_KEY=sp_live_xxx
 export SCIENCEPAL_BASE_URL=https://sciencepal.ai
-export SCIENCEPAL_MODEL=platform::deepseek-v4-flash
-# 必须：真实 filter agent UUID；留空则 balanced 明确降级为 fast
+# 可选：模型 id 必须来自 /api/billing/available-models；留空=平台默认（推荐）
+export SCIENCEPAL_MODEL=
+# balanced 需要：真实 filter agent UUID；留空则 balanced 明确降级为 fast
 export SCIENCEPAL_FILTER_AGENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
-# 可选：服务鉴权（前端带 Authorization: Bearer ...）
+# 可选：服务鉴权。默认留空 = 不鉴权（本机使用无需 token）
 export HCCFIT_ROUTER_TOKEN=
 # 可选：CORS 白名单
 export HCCFIT_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
@@ -110,6 +114,6 @@ strategies.run(scenario, strategy="fast", k=8, deadline_ms=150000, ...)
 
 - 不在前端暴露 `SCIENCEPAL_API_KEY`；
 - 所有请求经后端；header 模式只适合受控内网；
-- 服务端启用了 `HCCFIT_ROUTER_TOKEN` 后，`/v1/search` 必须带 `Authorization: Bearer <token>`；
+- 服务端**默认不鉴权**（`HCCFIT_ROUTER_TOKEN` 留空）；启用后 `/v1/search` 必须带 `Authorization: Bearer <token>`；
 - CORS 默认只允许 localhost；生产用 `HCCFIT_ALLOWED_ORIGINS` 收紧；
 - 临床输入必须脱敏/模拟；输出不是个体预测，不替代临床决策。

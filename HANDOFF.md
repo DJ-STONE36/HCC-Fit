@@ -121,6 +121,7 @@ python tests/test_supplement_ui.py
 python tests/test_router_client.py
 python tests/test_router_engine.py         # 7/7：内置 Router 引擎
 python tests/test_modes.py                 # 4/4：大脑只剩 2 种
+python tests/test_sciencepal_client.py     # 4/4：asked/错误码/initiate 参数
 QT_QPA_PLATFORM=offscreen python tests/smoke.py
 ```
 
@@ -294,8 +295,8 @@ curl http://127.0.0.1:8080/healthz
 ## 7. 建议新会话的接手顺序
 
 1. 读 `HANDOFF.md`、`desktop/README.md`、`router/README.md`；
-2. 跑桌面 7 个测试 + `--smoke`（见 3.2）；
-3. 跑 Router 11 个测试；
+2. 跑桌面 9 个测试 + `--smoke`（见 3.2）；
+3. 跑 Router 19 个测试；
 4. ~~先做用户最近要求的三项~~ ✅ 已完成（AI 移除 / 追问抑制 / 空格切分）；
 5. ~~再决定 Router~~ ✅ 已定：**内置进程内引擎**，一键检索；外部 HTTP 仍可选；
 6. 真 Key 端到端（五阶段 + HCC 单次 + Router balanced）；
@@ -304,7 +305,8 @@ curl http://127.0.0.1:8080/healthz
 ### Router 形态（已决定）
 
 - 默认：**进程内直连**（单 exe、无 8080、双击即用），这是当前实现；
-- 需要 Web/多端共用或 Router 独立升级时：切“外部 Router 服务（HTTP）”，多用户再加 `HCCFIT_ROUTER_TOKEN`。
+- 需要 Web/多端共用或 Router 独立升级时：切“外部 Router 服务（HTTP）”。
+  **服务端默认不鉴权**（`HCCFIT_ROUTER_TOKEN` 留空）；界面已不再要求填 token，只有远程部署才用环境变量设置。
 
 ---
 
@@ -316,6 +318,7 @@ curl http://127.0.0.1:8080/healthz
 - 补充资料：`desktop/app/supplement.py`、`desktop/app/main_window.py`
 - 内置 Router：`desktop/app/router_engine.py`、`desktop/app/router_dialog.py`、`desktop/app/router_client.py`
 - 五阶段：`desktop/core/planner.py`、`desktop/core/sciencepal.py`
+- SciencePal 接入规范（官方规则 / fast vs balanced / 五阶段 / 错误码）：`docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`
 - Router 服务：`router/hccfit/`（同一份源码，桌面直接 import，不复制）
 - 输入会话 schema：`desktop/resources/schemas/input_session.schema.json`
 - Router 检查报告：`docs/HCC-Fit_Simple_Router_检查报告_2026-10-29.md`
@@ -341,6 +344,11 @@ curl http://127.0.0.1:8080/healthz
 | **Router 内置** | 新增 `app/router_engine.py`（进程内 `hccfit.strategies.run`）；对话框“检索方式”默认内置、一键检索；spec 把 hccfit + toolkit 冻进 exe（`requests`/`xml.etree` 等依赖由静态分析收集）；外部 HTTP 仍可选；新增 `tests/test_router_engine.py`（7/7） |
 | 构建 | PyInstaller one-dir 重建（119MB，含 Router + requests）；`--smoke` 与 `--router-smoke` 均退出码 0（后者真实联网取回 3 篇 PubMed 候选） |
 | 版本控制 | 新增 git 基线（`.gitignore` 排除构建产物与运行期数据），便于后续 diff/回滚 |
+| **SciencePal 调用修正** | Router 改为 initiate(stream=true) → 立即读流(after_index=0) → 确认终态，修掉“轮询完再读流拿空答案 → balanced 静默降级”；支持 asked/failed/stopped；模型默认留空；补 `agent_select_type=manual` 与 401/403/404/422/429 中文提示 |
+| **桌面端** | `_poll` 识别 `asked`（明确报错，不再空等）；新增 `_http_hint`；initiate 补 `agent_select_type` |
+| **Router token** | 界面不再要求填 token；服务端默认不鉴权（留空），仅远程部署用 `HCCFIT_ROUTER_TOKEN` |
+| **接入文档** | 新增 `docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`（官方 8 条规则、fast vs balanced、五阶段、错误码、本次修复） |
+| **测试** | Router 新增 `test_agent_client.py`（8 项，全离线）→ 19 项；桌面新增 `test_sciencepal_client.py`（4 项）→ 9 个脚本 |
 
 验证命令（在包根目录）：
 

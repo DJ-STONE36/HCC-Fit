@@ -110,6 +110,9 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
 - **这只是题录/摘要，不是全文**；S2 四维核查仍需 PDF 或正文；
 - 该步骤是**可选前置**，不替换 S1，五阶段 Agent 逻辑不变。
 
+接入细节（官方 Agent 规则、fast vs balanced、五阶段、错误码）见
+[`docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`](../docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md)。
+
 仍支持外部 HTTP 服务（多端共用/远程部署时）：对话框里把“检索方式”切到
 “外部 Router 服务（HTTP）”，或设：
 
@@ -118,6 +121,7 @@ set HCCFIT_ROUTER_URL=http://127.0.0.1:8080
 ```
 
 开发态内置引擎默认找包内同级 `router/`；也可用 `HCCFIT_ROUTER_DIR` 指向别处。
+外部服务**默认不鉴权**（服务端 `HCCFIT_ROUTER_TOKEN` 留空即可）；界面不再要求填 token，仅远程部署时用环境变量配置。
 
 ![候选论文（内置 Router，一键检索）](docs/router_dialog.png)
 

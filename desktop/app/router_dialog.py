@@ -48,12 +48,11 @@ class RouterDialog(QDialog):
         ext = QHBoxLayout(self.external_row)
         ext.setContentsMargins(0, 0, 0, 0)
         self.url = QLineEdit(os.environ.get("HCCFIT_ROUTER_URL", "http://127.0.0.1:8080"))
-        self.token = QLineEdit()
-        self.token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token.setPlaceholderText("Router token（可选）")
+        # 不再在界面里要 Router token：默认服务端不鉴权（HCCFIT_ROUTER_TOKEN 留空）；
+        # 只有远程部署才需要，用环境变量配置，不打扰普通用户。
+        self.token = os.environ.get("HCCFIT_ROUTER_TOKEN", "").strip()
         ext.addWidget(QLabel("地址"))
         ext.addWidget(self.url, 3)
-        ext.addWidget(self.token, 2)
         top.addWidget(self.external_row, 1)
         lay.addLayout(top)
 
@@ -134,7 +133,8 @@ class RouterDialog(QDialog):
         self.external_row.setVisible(not builtin)
         if not builtin:
             self.engine_msg.setText("外部服务：需先启动 HCC-Fit_Simple_Router；"
-                                    "不想启动服务就选“内置引擎”。")
+                                    "不想启动服务就选“内置引擎”。"
+                                    "（服务端默认不鉴权；仅远程部署时用 HCCFIT_ROUTER_TOKEN）")
             self.search_btn.setEnabled(True)
             return
         from app.router_engine import engine_status
@@ -168,7 +168,7 @@ class RouterDialog(QDialog):
         self.worker = RouterWorker(
             self.scenario, self.strategy.currentData(), self.k.value(),
             self.sp_key.text().strip(), engine=engine,
-            base_url=self.url.text().strip(), token=self.token.text().strip(),
+            base_url=self.url.text().strip(), token=self.token,
             filter_agent_id=self.filter_agent.text().strip(),
         )
         self.worker.moveToThread(self.thread)

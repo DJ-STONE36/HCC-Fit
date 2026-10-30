@@ -177,6 +177,19 @@ class SciencePalBrain(Brain):
             out.append(detail)
         return out
 
+    @staticmethod
+    def _http_hint(what, status, body):
+        """把平台 HTTP 码翻译成可操作的提示（官方错误语义）。"""
+        hint = {
+            401: "API Key 无效、过期或未授权",
+            403: "没有该 Agent / 模型的权限，或密钥无权访问",
+            404: "找不到 Agent 或接口（确认 Agent 名称与 Base 地址）",
+            422: "参数不被接受（常见：模型在该账号不可用；本层未指定模型时请联系平台）",
+            429: "额度用尽或被限流，请检查账户额度后重试",
+        }.get(status, "HTTP %s" % status)
+        return "%s失败：%s；返回：%s" % (
+            what, hint, json.dumps(body, ensure_ascii=False)[:300])
+
     # ---------------- 探测 ----------------
     def probe(self):
         if self._key_issue:
@@ -187,7 +200,8 @@ class SciencePalBrain(Brain):
         if status == 401:
             return False, "401：Key 无效或未被授权（%s）" % self.key_summary(), []
         if status != 200:
-            return False, "HTTP %s：%s（%s）" % (status, str(body)[:200], self.key_summary()), []
+            return False, "%s（Key %s）" % (self._http_hint("探测 Agent 列表", status, body),
+                                            self.key_summary()), []
         items = body.get("agents") or body.get("items") or body.get("data") or []
         names = [a.get("name") for a in items if isinstance(a, dict)]
         real = [n for n in names if n]
@@ -278,6 +292,7 @@ class SciencePalBrain(Brain):
         if aid:                              # 找到了就显式指定；找不到就让平台自动路由（不拦）
             payload["agent_id"] = aid
             payload["agent_selection_explicit"] = True
+            payload["agent_select_type"] = "manual"
         else:
             if self.strict_agent:
                 names = self._agent_names()
@@ -329,8 +344,7 @@ class SciencePalBrain(Brain):
                     continue          # 字段都在，换编码再试
                 payload = self._heal(payload, need, prompt)
                 continue
-            raise BrainError("initiate 失败（HTTP %s）：%s"
-                             % (status, json.dumps(resp, ensure_ascii=False)[:400]))
+            raise BrainError(self._http_hint("initiate", status, resp))
 
         raise BrainError("initiate 失败：form/json 各试过仍被拒。最后一次返回：%s\n"
                          "请把 workspaces/<sid>/sp_raw/initiate_*.json 发我。"
@@ -366,8 +380,7 @@ class SciencePalBrain(Brain):
         self._dump("add_message", status, body)
         self._log("add_message -> %s %s" % (status, str(body)[:120]))
         if status != 200:
-            raise BrainError("写入用户消息失败（HTTP %s）：%s"
-                             % (status, json.dumps(body, ensure_ascii=False)[:300]))
+            raise BrainError(self._http_hint("写入用户消息", status, body))
         mid = (body or {}).get("message_id") or mid
 
         def start():
@@ -385,8 +398,7 @@ class SciencePalBrain(Brain):
             status, body = start()
             self._dump("start_retry", status, body)
         if status != 200:
-            raise BrainError("agent/start 失败（HTTP %s）：%s"
-                             % (status, json.dumps(body, ensure_ascii=False)[:300]))
+            raise BrainError(self._http_hint("agent/start", status, body))
         rid = self._walk(body, ["agent_run", "run"]) or body.get("id")
         if not rid:
             raise BrainError("agent/start 没返回 run_id：%s" % json.dumps(body, ensure_ascii=False)[:300])
@@ -401,9 +413,17 @@ class SciencePalBrain(Brain):
             state = str(info.get("status") or info.get("state") or info.get("executionState") or "").lower()
             if state in ("completed", "finished"):
                 break
+            if state == "asked":
+                # 官方语义：asked = 等用户回答，不是完成；不能当“还在跑”空等到超时
+                raise BrainError(
+                    "Agent 在追问（asked），需要先回答才能继续；当前版本不会自动回答。"
+                    "可到 SciencePal 网页继续该会话，或换一个不追问的 Agent/提示词。"
+                    "（thread_id=%s, run_id=%s）" % (tid or self._thread_id or "-", rid))
             if state in ("failed", "error", "stopped"):
-                raise BrainError("Agent 运行失败（%s）：%s"
-                                 % (state, json.dumps(info, ensure_ascii=False)[:400]))
+                err = info.get("error") or info.get("detail") or ""
+                raise BrainError("Agent 运行失败（%s）：%s%s"
+                                 % (state, str(err)[:300],
+                                    "" if err else json.dumps(info, ensure_ascii=False)[:400]))
             time.sleep(1.5)
         self._dump("run_%s" % rid, 200, last)
         self._log("run %s -> %s" % (rid, str(last)[:160]))
