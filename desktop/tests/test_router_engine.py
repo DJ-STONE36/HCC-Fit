@@ -155,6 +155,78 @@ def case_dialog():
     return "只有内置引擎；Key 来自主窗口；无 filter agent 输入"
 
 
+def _dialog_with_papers():
+    from PySide6.QtWidgets import QApplication
+    from app.router_dialog import RouterDialog
+    QApplication.instance() or QApplication([])
+    dlg = RouterDialog(SCENARIO, "sp_live_abcdefghijklmnop")
+    papers = [
+        {"pmid": "111", "title": "Deep Segmentation Feature-Based Radiomics Improves "
+                                "Recurrence Prediction in Early-Stage Hepatocellular "
+                                "Carcinoma After Curative Resection: A Multicenter Study",
+         "year": 2023, "journal": "Eur Radiol", "doi": "10.1/x",
+         "readability": {"level": "abstract_only"}, "why": ["匹配"], "risk": ["回顾性"]},
+        {"pmid": "222", "title": "Second paper", "year": 2021, "journal": "Ann Surg",
+         "readability": {"level": "fulltext"}, "why": [], "risk": []},
+    ]
+    dlg._on_done({"papers": papers, "warnings": [], "strategy_used": "fast"})
+    return dlg
+
+
+def case_open_link_without_selection():
+    from PySide6.QtGui import QDesktopServices
+    dlg = _dialog_with_papers()
+    dlg.table.setCurrentCell(-1, -1)
+    opened = []
+    orig = QDesktopServices.openUrl
+    QDesktopServices.openUrl = staticmethod(lambda u: opened.append(u.toString()) or True)
+    try:
+        dlg.open_fulltext()
+    finally:
+        QDesktopServices.openUrl = orig
+        dlg.close()
+    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/111/"], opened
+    return "未选行时打开第一篇（不再无反应）"
+
+
+def case_titles_wrap():
+    from PySide6.QtWidgets import QHeaderView
+    from PySide6.QtCore import Qt
+    dlg = _dialog_with_papers()
+    try:
+        vh = dlg.table.verticalHeader()
+        assert vh.sectionResizeMode(0) == QHeaderView.ResizeMode.ResizeToContents
+        assert dlg.table.textElideMode() == Qt.TextElideMode.ElideNone
+        assert dlg.table.rowHeight(0) > 44, dlg.table.rowHeight(0)
+        full = dlg.table.item(0, 1).text()
+        assert "Multicenter Study" in full      # 完整标题保留在 item 里
+    finally:
+        dlg.close()
+    return "标题完整、行高随内容换行"
+
+
+def case_save_candidates():
+    import os
+    import shutil
+    dlg = _dialog_with_papers()
+    data = BASE / "tests" / "_tmp_router_ui"
+    shutil.rmtree(data, ignore_errors=True)
+    os.environ["HCCFIT_DATA_DIR"] = str(data)
+    try:
+        dlg.save_candidates()
+        assert dlg.result() == 1, dlg.result()
+        path = Path(dlg.candidate_path)
+        assert path.is_file(), path
+        text = path.read_text(encoding="utf-8")
+        assert "First" in text or "Deep Segmentation" in text, text[:200]
+        assert "PMID: 111" in text
+    finally:
+        os.environ.pop("HCCFIT_DATA_DIR", None)
+        shutil.rmtree(data, ignore_errors=True)
+        dlg.close()
+    return "保存候选落盘并 accept()"
+
+
 def main():
     check("内置引擎可用", case_engine_available)
     check("检索参数透传", case_search_passthrough)
@@ -162,6 +234,9 @@ def main():
     check("后台线程：内置引擎", case_worker_builtin)
     check("后台线程：外部 HTTP", case_worker_http)
     check("对话框只有内置引擎", case_dialog)
+    check("打开链接（未选行）", case_open_link_without_selection)
+    check("标题换行完整显示", case_titles_wrap)
+    check("保存候选", case_save_candidates)
     ok = sum(1 for r in RESULTS if r)
     print("\n%d/%d 通过" % (ok, len(RESULTS)))
     return 0 if ok == len(RESULTS) else 1

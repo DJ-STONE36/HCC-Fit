@@ -122,12 +122,12 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
 
 开发态内置引擎默认找包内同级 `router/`；也可用 `HCCFIT_ROUTER_DIR` 指向别处。
 
-![候选论文（内置 Router，一键检索）](docs/router_dialog.png)
+![候选论文（内置 Router，一键检索；标题完整换行）](docs/router_dialog.png)
 
 测试：
 
 ```bash
-python tests/test_router_engine.py   # 内置引擎：状态/参数透传/错误映射/对话框 6 项
+python tests/test_router_engine.py   # 内置引擎 + 候选对话框（打开链接/标题换行/保存）9 项
 python tests/test_router_client.py   # Router 场景映射
 ```
 

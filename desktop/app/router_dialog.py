@@ -73,6 +73,10 @@ class RouterDialog(QDialog):
         self.table.setHorizontalHeaderLabels(["选", "标题", "年", "期刊", "可读性", "为什么 / 风险"])
         self.table.setWordWrap(True)
         self.table.setAlternatingRowColors(True)
+        self.table.setTextElideMode(Qt.TextElideMode.ElideNone)   # 标题不省略
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)             # 行高随内容（长标题换行）
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -180,7 +184,10 @@ class RouterDialog(QDialog):
             cell = QTableWidgetItem(extra)
             cell.setToolTip(extra)
             self.table.setItem(row, 5, cell)
-            self.table.setRowHeight(row, 48)
+        # 行高按内容自适应，标题长就换行显示（不再固定 48px 截断）
+        self.table.resizeRowsToContents()
+        for row in range(self.table.rowCount()):
+            self.table.setRowHeight(row, max(44, self.table.sizeHintForRow(row)))
         warnings = data.get("warnings") or []
         degraded = (data.get("meta") or {}).get("degraded")
         self.warn.setPlainText("\n".join(warnings) or ("已降级：SciencePal 不可用" if degraded else "无警告"))
@@ -197,22 +204,47 @@ class RouterDialog(QDialog):
         self.warn.setPlainText(msg)
 
     # ---------------- 候选操作 ----------------
-    def _row_paper(self):
-        row = self.table.currentRow()
-        if row < 0:
+    def _paper_at(self, row: int):
+        if row < 0 or row >= self.table.rowCount():
             return None
         cell = self.table.item(row, 0)
         return cell.data(Qt.ItemDataRole.UserRole) if cell else None
 
+    def _row_paper(self):
+        """当前行；没有选中时退回第一行（按钮不再“点了没反应”）。"""
+        p = self._paper_at(self.table.currentRow())
+        if p:
+            return p
+        for row in range(self.table.rowCount()):
+            p = self._paper_at(row)
+            if p:
+                return p
+        return None
+
     def open_fulltext(self):
         p = self._row_paper()
         if not p:
+            QMessageBox.information(self, "没有候选", "请先“一键检索候选”，再打开论文链接。")
             return
         rd = p.get("readability") or {}
-        url = rd.get("url") or (
-            "https://pubmed.ncbi.nlm.nih.gov/%s/" % p.get("pmid") if p.get("pmid") else "")
-        if url:
-            QDesktopServices.openUrl(QUrl(url))
+        pmid = str(p.get("pmid") or "").strip()
+        url = str(rd.get("url") or "").strip()
+        if not url and pmid:
+            url = "https://pubmed.ncbi.nlm.nih.gov/%s/" % pmid
+        if not url:
+            QMessageBox.information(self, "没有链接", "这篇候选没有 PMID/链接，无法打开。")
+            return
+        ok = QDesktopServices.openUrl(QUrl(url))
+        if not ok:                          # 极少数环境没有默认浏览器关联
+            try:
+                import webbrowser
+                ok = bool(webbrowser.open(url))
+            except Exception:  # noqa: BLE001
+                ok = False
+        if not ok:
+            QApplication.clipboard().setText(url)
+            QMessageBox.information(self, "已复制链接",
+                                    "系统未能自动打开浏览器，链接已复制到剪贴板：\n%s" % url)
 
     def copy_doi(self):
         p = self._row_paper()
@@ -222,10 +254,16 @@ class RouterDialog(QDialog):
     def save_candidates(self):
         selected = self._selected_papers()
         if not selected:
-            QMessageBox.warning(self, "未选择", "请至少勾选一篇候选。")
-            return
+            if not self.papers:
+                QMessageBox.warning(self, "没有候选", "请先“一键检索候选”。")
+                return
+            if QMessageBox.question(
+                    self, "未勾选候选",
+                    "没有勾选任何候选。要保存全部 %d 篇吗？" % len(self.papers)) \
+                    != QMessageBox.StandardButton.Yes:
+                return
+            selected = list(self.papers)
         out_dir = paths.app_data_dir() / "router_candidates"
-        out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / ("router_candidates_%s.md" % time.strftime("%Y%m%d_%H%M%S"))
         lines = [
             "# PubMed 候选论文（Router）",
@@ -248,8 +286,15 @@ class RouterDialog(QDialog):
                 "- 摘要: %s" % (p.get("abstract_snippet") or "—"),
                 "",
             ]
-        path.write_text("\n".join(lines), encoding="utf-8")
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(lines), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "保存失败",
+                                 "%s: %s\n目标目录：%s" % (type(exc).__name__, exc, out_dir))
+            return
         self.candidate_path = str(path)
+        self.status.setText("已保存 %d 篇候选：%s" % (len(selected), path.name))
         self.accept()
 
     def _selected_papers(self):
