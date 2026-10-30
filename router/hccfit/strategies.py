@@ -80,7 +80,14 @@ def run(scenario: dict, strategy: str = "auto", k: int = 5,
             else:
                 papers = kept
                 meta["filter_out"] = len(kept)
-                if len(papers) < k:
+                if not kept and candidates:
+                    # fit 全 <1：可能是真不匹配，也可能是评分尺度理解偏差；不返回空结果，
+                    # 回退算法 top-k 并明确标记 degraded，让人工判断。
+                    warnings.append(
+                        "filter 未保留任何论文（fit 均 <1）；已回退算法 top-k，请人工判断")
+                    meta["degraded"] = True
+                    papers = candidates[:k]
+                elif len(papers) < k:
                     warnings.append(
                         f"filter kept {len(papers)}/{k}; no unverified padding")
         except SciencePalError as exc:

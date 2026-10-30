@@ -304,7 +304,9 @@ def filter_papers(scenario: dict, papers: list[dict], timeout_s: int = 90,
         "你是 HCC 预测模型检索的医生式监督器。场景：\n" + (scenario.get("text") or "") +
         "\n\n候选：\n" + json.dumps(cand, ensure_ascii=False) +
         "\n\n按医生流程：真实预测/预后模型？结局、时间零点、人群/治疗是否匹配？"
-        "fit 0-2；不匹配 drop；冲突保留 fit=1 标注；不要因标题有 nomogram 就保留。"
+        "评分 fit 只取整数 0/1/2，含义固定：2=直接可用；1=有条件可用（有冲突或需补数据）；"
+        "0=不匹配/非预测模型/证据不足。keep 里只放 fit 1-2，fit 0 一律进 drop。"
+        "不要因标题有 nomogram 就保留。"
         "只输出严格 JSON："
         '{"keep":[{"pmid":"","fit":0,"reason":""}],"drop":[{"pmid":"","reason":""}]}'
     )

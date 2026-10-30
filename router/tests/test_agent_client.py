@@ -267,5 +267,20 @@ class AgentClientTests(unittest.TestCase):
         self.assertEqual(posts[0]["agent_id"], "env-agent")
 
 
+    def test_filter_empty_keep_falls_back(self):
+        from hccfit import strategies
+        papers = [{"pmid": "1", "title": "A"}, {"pmid": "2", "title": "B"}]
+        base = {"papers": papers, "pool": papers,
+                "meta": {"retrieval_ms": 1, "readability": {}}}
+        with mock.patch.object(strategies, "fast_search", return_value=base),                 mock.patch.object(strategies, "filter_papers",
+                                  return_value={"parsed": {"keep": []},
+                                                "status": "completed", "latency_ms": 3}),                 mock.patch.object(strategies, "annotate_readability",
+                                  side_effect=lambda ps: ps):
+            out = strategies.run({"text": "HCC", "disease": "HCC"}, "balanced", 2, 150000)
+        self.assertTrue(out["meta"]["degraded"])
+        self.assertEqual([p["pmid"] for p in out["papers"]], ["1", "2"])
+        self.assertTrue(any("回退算法" in w for w in out["warnings"]), out["warnings"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

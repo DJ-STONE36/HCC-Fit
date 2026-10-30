@@ -28,13 +28,17 @@ sys.path.insert(0, str(ROOT / "router"))
 
 
 def load_env(path) -> dict:
+    """容忍 BOM / export 前缀 / 引号 / CRLF。"""
     data = {}
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
+    text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+    for line in text.splitlines():
         line = line.strip()
+        if line.lower().startswith("export "):
+            line = line[7:].strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        data[key.strip()] = value.strip().strip('"').strip("'")
+        data[key.strip()] = value.strip().strip('"').strip("'").strip()
     return data
 
 
