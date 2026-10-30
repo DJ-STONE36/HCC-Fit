@@ -356,6 +356,7 @@ curl http://127.0.0.1:8080/healthz
 | **内置 Agent** | 桌面 `DEFAULT_AGENT_ID` 与 Router `DEFAULT_FILTER_AGENT_ID` 均指向实测可用的 `HCC-Fit`；界面去掉 Base/Agent 输入，只留 Key；`SCIENCEPAL_AGENT_ID` / `SCIENCEPAL_FILTER_AGENT_ID` 可覆盖，设空则回退查找/自动路由；Key 无权使用内置 Agent（403/404）时自动退回按名称/平台路由 |
 | **逐篇发送 + 文案** | 标题去“大脑”；测试连接成功只显示“能连上”；新增复选框“多篇论文时逐篇发给 Agent”：五阶段逐篇 S2、单次核查逐篇出报告后合并 papers/matched/期望数据（默认一次带全部）；新增 test_split_papers 4 项 |
 | **逐篇进度行** | 流程面板支持动态子行：逐篇事件用 `match#i` / `hcc#i`，插在父行之后，各自显示“运行中/完成 · tier · 耗时”；每次启动前重建流程行，避免上次残留；新增 3 项测试 |
+| **口述例子回归** | 用 5 个临床例子检验并补齐：术后时长支持年/月/周/天与“一个月复查”；“刚开完刀/根治性手术”映射切除+术后；额外抽取肿瘤大小、癌栓/镜下癌栓、BCLC、分期范围；意图改为疑问句评分并保留并列问题；“总的生存期”判为明确 OS。新增 test_clinical_examples（5 项） |
 | **接入文档** | 新增 `docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`（官方 8 条规则、fast vs balanced、五阶段、错误码、本次修复） |
 | **测试** | Router 新增 `test_agent_client.py`（8 项，全离线）→ 19 项；桌面新增 `test_sciencepal_client.py`（4 项）→ 9 个脚本 |
 

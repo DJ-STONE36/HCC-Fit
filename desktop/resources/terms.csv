@@ -5,7 +5,7 @@ disease.liver_lesion_unspecified,肝脏病变，性质与类型未明确,disease
 disease.malignancy_unspecified,恶性肿瘤，部位及类型未明确,disease,恶性肿瘤|癌症,ambiguous,general,不自动补部位
 disease.icca,肝内胆管癌,disease,肝内胆管癌|iCCA|胆管细胞癌,out_of_scope,non_hcc,首版HCC范围外
 disease.metastasis,肝转移性病变,disease,结肠癌肝转移|肝转移|转移性肝癌,out_of_scope,non_hcc,首版HCC范围外
-treatment.resection,已接受切除,treatment,肝切除|切除|刚切完|刚做完切除|做了手术,ambiguous,hcc,术式/根治性未明确
+treatment.resection,已接受切除,treatment,肝切除|切除|刚切完|刚做完切除|做了手术|刚开完刀|刚做完手术|根治性手术|根治性切除,ambiguous,hcc,术式/根治性未明确
 treatment.tace,TACE,treatment,TACE|介入化疗|肝动脉化疗栓塞,normalized,hcc,
 treatment.ablation,消融,treatment,消融|射频消融|微波消融,normalized,hcc,
 treatment.system,系统治疗,treatment,系统治疗|靶向治疗|免疫治疗|PD-1,normalized,hcc,
@@ -14,11 +14,11 @@ treatment.postop,治疗后，治疗类型未明确,treatment,术后|手术后|�
 treatment.none,未治疗,treatment,未治疗|没有治疗|未接受治疗,negated,hcc,
 treatment.no_surgery,未手术,treatment,未手术|没有手术|未做手术,negated,hcc,
 stage.pre_surgery,术前,stage,术前|手术前|拟手术|准备手术|准备肝切除|拟肝切除,normalized,hcc,
-stage.post_surgery,术后,stage,术后|手术后|切除后|刚切完|刚做完,ambiguous,hcc,治疗类型/时间未明确
+stage.post_surgery,术后,stage,术后|手术后|切除后|刚切完|刚做完|刚开完刀|刚做完手术|根治性切除后|根治性手术后,ambiguous,hcc,治疗类型/时间未明确
 stage.post_pathology_pending,治疗后，病理未取得,stage,病理还没出来|病理未出|等病理|病理未回报,normalized,hcc,不等于病理阴性
 outcome.os,总生存OS,outcome,总生存|OS|生存率|生存期|生存,ambiguous,hcc,需确认
 outcome.recurrence,复发,outcome,复发|无复发生存|RFS|早期复发,ambiguous,hcc,
-outcome.prognosis_unclear,预测需求未明确,outcome,看预后|还能活多久|预后怎么样|能活多久,unknown,hcc,不生成寿命或概率
+outcome.prognosis_unclear,预测需求未明确,outcome,看预后|还能活多久|预后怎么样|能活多久|能活多长时间|活多长时间|生存多长时间,unknown,hcc,不生成寿命或概率
 start.surgery,手术日,start,从手术日|手术日起|以手术日,normalized,hcc,
 start.today,今天,start,从今天|从现在|当前起|从当前,normalized,hcc,
 horizon.12m,12个月,horizon,一年|1年|12个月,normalized,hcc,
@@ -28,3 +28,4 @@ data.pathology_missing,病理未取得,data,病理还没出来|病理未出|等�
 data.mvi_missing,MVI未取得,data,没有MVI结果|MVI未查|未查MVI|MVI结果没有,unknown,hcc,
 data.imaging,已有影像,data,有CT|做过CT|有MRI|做过MRI|有影像,normalized,hcc,
 data.labs,已有化验,data,血常规|肝功|肝功能|AFP,normalized,hcc,
+data.vascular_invasion,血管侵犯/癌栓,data,癌栓|镜下癌栓|微血管侵犯|脉管癌栓|MVI阳性,normalized,hcc,病理或影像提示血管侵犯；镜下癌栓≈MVI

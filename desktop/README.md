@@ -43,6 +43,12 @@ python main.py
 - 修改后重新确认，`input_session.version + 1`；
 - `肝癌、肝脏肿瘤、恶性肿瘤` 不会被自动归为 HCC；
 - 每字段保存原话、整理值、状态、来源片段、确认状态、`concept_id`；
+- 口述习惯兼容（2026-10-30 按 5 个临床例子补齐）：
+  - 术后时长支持 **年/月/周/天**（“术后 2 年”“根治性切除一个月”“一个月复查”都识别）；
+  - “刚开完刀 / 根治性手术 / 根治性切除”算作切除 + 术后；
+  - 从**已有资料**里额外抠出：肿瘤大小（`10 公分`）、血管侵犯/癌栓（含“镜下癌栓”）、BCLC 分期（`巴塞罗那分期 B 期`）、分期范围（`0 到 A 期`）；
+  - 意图按“疑问句 + 时间/结局词”打分（状态陈述如“复查都挺好”降权），同时问复发与生存时**两句都保留**；
+  - “总的生存期”视为明确 OS，不再追问结局；
 - **不再有 AI 候选层**（2026-10-30 按用户要求移除 `app/ai_extract.py` 及界面入口）；
 - Agent v0.6 不修改，确认后的场景卡映射为原 `scenario`；
 - 输入会话存 `AppLocalData/inputs/<input_id>.json`，原话不覆盖。
@@ -77,6 +83,7 @@ python main.py
 ```bash
 python tools/input_demo.py "肝癌患者，刚切完，病理还没出来，想看看三年生存。"
 python tests/test_input_normalization.py   # 15/15
+python tests/test_clinical_examples.py     # 5/5：用户给的 5 个口述例子
 python tests/test_input_review.py          # 场景卡 UI 冒烟（含零追问场景）
 ```
 
@@ -153,6 +160,7 @@ python tests/test_router_client.py   # Router 场景映射
 ```bash
 python tests/smoke.py                    # 主窗口：确认场景卡 → stub → 导出 JSON/PDF → schema
 python tests/test_input_normalization.py # 规则/冲突/追问抑制/空格切分/schema 15 项
+python tests/test_clinical_examples.py   # 5 个临床口述例子（术后时长/癌栓/BCLC/意图）
 python tests/test_input_review.py        # 场景卡对话框（含“零追问”场景）
 python tests/test_supplement.py          # 补充资料拼接/落盘
 python tests/test_supplement_ui.py       # 补充重跑 + 新旧报告切换

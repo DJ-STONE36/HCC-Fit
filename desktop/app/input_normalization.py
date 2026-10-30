@@ -56,6 +56,9 @@ HISTORY_CUES = ("既往", "曾", "以前", "病史", "多年前", "之前")
 SUSPECT_CUES = ("疑似", "考虑", "待排", "可能", "不除外", "疑为", "高度怀疑")
 NEG_CUES = ("非", "不是", "排除", "未见", "否认", "无", "未发现")
 
+_CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+           "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
 HORIZON_MONTHS = {
     "一年": 12, "1年": 12, "12个月": 12,
     "两年": 24, "2年": 24, "24个月": 24,
@@ -207,7 +210,7 @@ EXPLICIT_TREATMENT_CONCEPTS = frozenset({
 NO_TREATMENT_CONCEPTS = frozenset({"treatment.none", "treatment.no_surgery"})
 EXPLICIT_START_VALUES = ("手术日", "今天", "治疗日")
 EXPLICIT_START_CONCEPTS = ("start.surgery", "start.today")
-OS_RAW_RE = re.compile(r"OS|总生存|overall\s+survival", re.I)
+OS_RAW_RE = re.compile(r"OS|总(?:的)?生存|overall\s+survival", re.I)
 
 
 def _user_settled(f: FieldValue) -> bool:
@@ -239,7 +242,9 @@ def field_sufficient(session: InputSession, name: str) -> bool:
         return _user_settled(f) and "类型未明确" not in (f.normalized or "")
     if name == "outcome":
         if f.concept_id == "outcome.os":
-            return bool(OS_RAW_RE.search(f.raw or ""))
+            # “总的生存期”这类原话就算明确 OS；只看原文/来源句，不看 canonical（canonical 永远含“总生存”）
+            text = "%s %s" % (f.raw or "", f.source_sentence or "")
+            return bool(OS_RAW_RE.search(text))
         if f.concept_id == "outcome.recurrence":
             return True
         return _user_settled(f) and f.normalized not in ("未明确", "预测需求未明确")
@@ -476,6 +481,7 @@ class RuleExtractor:
         self._resolve_time(session, by_field.get("start") or [], by_field.get("horizon") or [], text)
         self._resolve_intent(session, text)
         self._resolve_subject(session, text)
+        self._resolve_extra_data(session, text)
         self._dedupe_data(session)
         self._rebuild_followups(session)
         return session
@@ -612,37 +618,72 @@ class RuleExtractor:
         self._set(f, c, "ambiguous" if c["status"] == "normalized" else c["status"])
         if c["concept_id"] == "outcome.os":
             f.flags.append("“生存”需确认是总生存还是其他")
+        if "outcome.recurrence" in ids and "outcome.prognosis_unclear" in ids:
+            f.flags.append("原话同时问到复发与生存期，建议分别核查")
 
     # ---- 时间 ----
     def _resolve_time(self, session, starts, horizons, text):
         f_start = session.fields["start_point"]
         f_h = session.fields["horizon"]
         f_d = session.fields["postop_duration"]
-        # 术后 X 年：先记为已术后时长
-        m = re.search(r"术后\s*(一年|1\s*年|两年|2\s*年|三年|3\s*年|五年|5\s*年)", text)
+        # 术后/切除后 X（年/月/周/天）：记为已术后时长；兼容“刚开完刀”“根治性切除一个月”
+        m = re.search(
+            r"(?:术后|手术后|切除术后|切除后|根治性切除后|根治性手术后|根治性切除|刚开完刀|刚做完手术)"
+            r"\s*(\d+|[一二两三四五六七八九十]+)\s*(年|个月|月|周|天)",
+            text)
         if m:
-            val = HORIZON_MONTHS.get(re.sub(r"\s+", "", m.group(1)))
-            if val:
-                sess, start, end = sentence_at(text, m.start(), m.end())
+            num_raw, unit = m.group(1), m.group(2)
+            num = int(num_raw) if num_raw.isdigit() else _CN_NUM.get(num_raw, 0)
+            if num > 0:
+                if unit == "年":
+                    norm = "%d个月" % (num * 12)
+                elif unit in ("个月", "月"):
+                    norm = "%d个月" % num
+                else:
+                    norm = "%d%s" % (num, unit)
+                sess, _s, _e = sentence_at(text, m.start(), m.end())
                 f_d.raw = m.group(0)
-                f_d.normalized = "%d个月" % val
+                f_d.normalized = norm
                 f_d.status = "normalized"
                 f_d.source_span = [m.start(), m.end()]
                 f_d.source_sentence = sess
                 f_d.confirm = "pending"
-                if "未来" in text[m.end():m.end() + 8] or "以后" in text[m.end():m.end() + 8]:
-                    f_start.raw = text[m.start():m.end()]
+                tail = text[m.end():m.end() + 10]
+                head = text[max(0, m.start() - 6):m.start()]
+                now_cue = any(k in tail or k in head or k in sess
+                              for k in ("未来", "以后", "接下来", "现在", "目前", "当前", "这次", "复查"))
+                f_start.raw = m.group(0)
+                f_start.source_span = [m.start(), m.end()]
+                f_start.source_sentence = sess
+                if now_cue:
                     f_start.normalized = "今天"
                     f_start.status = "normalized"
                     f_start.concept_id = "start.today"
-                    f_start.source_span = [m.start(), m.end()]
-                    f_start.source_sentence = sess
                 else:
-                    f_start.raw = text[m.start():m.end()]
                     f_start.normalized = "时间含义未明（已术后 vs 预测术后）"
                     f_start.status = "ambiguous"
-                    f_start.source_span = [m.start(), m.end()]
-                    f_start.source_sentence = sess
+        # 兜底：写了“一个月复查/随访”也算术后时长（例：刚开完刀，一个月复查）
+        if f_d.status != "normalized":
+            m2 = re.search(r"(\d+|[一二两三四五六七八九十]+)\s*(个月|月|周|天)\s*(?:复查|随访)", text)
+            if m2:
+                num_raw, unit = m2.group(1), m2.group(2)
+                num = int(num_raw) if num_raw.isdigit() else _CN_NUM.get(num_raw, 0)
+                if num > 0:
+                    sess, _s, _e = sentence_at(text, m2.start(), m2.end())
+                    f_d.raw = m2.group(0)
+                    f_d.normalized = ("%d个月" % num) if unit in ("个月", "月") else ("%d%s" % (num, unit))
+                    f_d.status = "normalized"
+                    f_d.source_span = [m2.start(), m2.end()]
+                    f_d.source_sentence = sess
+        # 有术后时长但阶段没识别：补成术后
+        if f_d.status == "normalized" and session.fields["stage"].status == "unknown":
+            st = session.fields["stage"]
+            st.raw = f_d.raw
+            st.normalized = "术后"
+            st.status = "ambiguous"
+            st.source_span = f_d.source_span
+            st.source_sentence = f_d.source_sentence
+
         # 明确起点
         for c in starts:
             if c["status"] == "normalized":
@@ -681,24 +722,53 @@ class RuleExtractor:
             f_start.source_sentence = f_d.source_sentence
 
     # ---- 意图 / 主体 ----
+    INTENT_STRONG = re.compile(r"多长时间|多久|几个月|几年|生存期|能活|预后|复发|转移|生存率|生存")
+    INTENT_CUES = re.compile(r"想|希望|要|需要|评估|预测|预期|预计|看|是否|能不能|会不会|可以|问|了解")
+    INTENT_NOISE = re.compile(r"挺好|良好|正常|稳定|不错|恢复好")
+
     def _resolve_intent(self, session, text):
+        """挑真正的“想问的问题”：疑问句/带时间-结局词优先，状态陈述降权。"""
         f = session.fields["intent"]
         clauses = []
-        for seg, s, _e in split_sentences(text):
+        for seg, _s, _e in split_sentences(text):
             for m in re.finditer(r"[^，,；;]+", seg):
                 c = m.group(0).strip()
                 if c:
                     clauses.append(c)
-        cand = [c for c in clauses if re.search(r"想|希望|要|需要|评估|预测|看|是否|能不能|问|了解", c)]
-        if cand:
-            q = max(cand, key=len)
-            f.raw = q
-            f.normalized = q
-            f.status = "normalized"
-            f.source_sentence = q
-        else:
+        scored = []
+        for c in clauses:
+            core = c.strip("。！？?! 	")
+            if not core:
+                continue
+            score = 0
+            if c.rstrip().endswith(("？", "?")):
+                score += 3
+            if re.search(r"吗|呢", core):
+                score += 2
+            if self.INTENT_STRONG.search(core):
+                score += 3
+            if self.INTENT_CUES.search(core):
+                score += 1
+            if self.INTENT_NOISE.search(core):
+                score -= 3
+            scored.append((score, len(core), core))
+        best = max((x[0] for x in scored), default=0)
+        if best <= 0:
             f.status = "unknown"
             f.normalized = "未明确"
+            return
+        if best >= 6:
+            floor = max(6, best - 1)
+            top = sorted([x for x in scored if x[0] >= floor], key=lambda x: x[1], reverse=True)
+            chosen = [x[2] for x in top[:2]]
+        else:
+            top = sorted([x for x in scored if x[0] == best], key=lambda x: x[1], reverse=True)
+            chosen = [top[0][2]]
+        q = "；".join(chosen)
+        f.raw = q
+        f.normalized = q
+        f.status = "normalized"
+        f.source_sentence = q
 
     def _resolve_subject(self, session, text):
         f = session.fields["subject"]
@@ -713,6 +783,32 @@ class RuleExtractor:
         elif text:
             f.normalized = "患者本人"
             f.status = "normalized"
+
+    def _resolve_extra_data(self, session, text):
+        """术语表之外的定量信息：肿瘤大小、BCLC/分期范围（作为“已有资料”记录）。"""
+        def add(raw, normalized, concept_id, span):
+            sess, _s, _e = sentence_at(text, span[0], span[1])
+            session.data_available.append(FieldValue(
+                field="data", raw=raw, normalized=normalized, status="normalized",
+                source_span=[span[0], span[1]], source_sentence=sess,
+                candidates=[{"source": "rule", "concept_id": concept_id}],
+                concept_id=concept_id))
+
+        m = re.search(r"(\d+(?:\.\d+)?)\s*(cm|公分|厘米)", text, re.I)
+        if m:
+            add(m.group(0), "肿瘤大小 %s cm" % m.group(1), "data.tumor_size",
+                (m.start(), m.end()))
+
+        m = re.search(r"(BCLC|巴塞罗那分期)\s*([0-9A-Ca-c])\s*期", text, re.I)
+        if m:
+            add(m.group(0), "BCLC %s 期" % m.group(2).upper(), "data.bclc",
+                (m.start(), m.end()))
+
+        m = re.search(r"([零0-9]+)\s*到\s*([A-Ca-c])\s*期", text)
+        if m:
+            lo = m.group(1).replace("零", "0")
+            add(m.group(0), "分期 %s-%s 期" % (lo, m.group(2).upper()),
+                "data.stage_range", (m.start(), m.end()))
 
     def _dedupe_data(self, session):
         seen, out = set(), []
