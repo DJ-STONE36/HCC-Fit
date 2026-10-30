@@ -67,6 +67,18 @@ def main():
         assert full.table.item(row_of(full, name), 6).text() == "足够", name
     full.close()
 
+    # 3) 只缺“想预测多长时间”：回答 3 年后可直接确认
+    no_h = InputReviewDialog("HCC，准备肝切除，从手术日起预测复发",
+                             BASE / "resources" / "terms.csv")
+    assert [f.id for f in no_h.session.followups] == ["q_horizon"], \
+        [f.id for f in no_h.session.followups]
+    combo, _ = no_h.follow_widgets["q_horizon"]
+    combo.setCurrentIndex(combo.findData("3 年"))
+    QTest.qWait(30)
+    assert no_h.session.fields["horizon"].normalized == "36个月"
+    assert no_h.ok_btn.isEnabled(), no_h.hint.text()
+    no_h.close()
+
     print("PASS input review dialog: rows=%d, followups=%d, full=0, 7 列"
           % (rows, len(ids)))
     return 0

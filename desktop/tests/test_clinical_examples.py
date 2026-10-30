@@ -40,8 +40,8 @@ def case_1():
     assert "复发" in s.fields["intent"].normalized
     assert "多长时间" in s.fields["intent"].normalized
     ids = {q.id for q in s.followups}
-    assert ids == {"q_disease"}, ids                          # 只缺疾病类型
-    return "术后2年/今天起算/只问疾病/意图正确"
+    assert ids == {"q_disease", "q_horizon"}, ids            # 缺疾病类型 + 预测范围
+    return "术后2年/今天起算/只问疾病与范围/意图正确"
 
 
 def case_2():
@@ -85,8 +85,9 @@ def case_5():
     assert field_sufficient(s, "outcome") is True               # “总的生存期”=明确 OS
     data = [d.normalized for d in s.data_available]
     assert any("0-A" in x for x in data), data
-    assert not s.followups, [q.id for q in s.followups]
-    return "HCC/术后1月/总分期的 OS 足够 → 零追问"
+    ids = {q.id for q in s.followups}
+    assert ids == {"q_horizon"}, ids          # 只差“想预测多长时间”
+    return "HCC/术后1月/OS 足够 → 只问预测范围"
 
 
 def main():

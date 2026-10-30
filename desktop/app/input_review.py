@@ -2,6 +2,7 @@
 """单输入场景卡：解析 → 字段确认 → 集中追问 → 确认后交给 Agent v0.6。"""
 from __future__ import annotations
 
+import re
 from html import escape
 
 from PySide6.QtCore import Qt
@@ -257,7 +258,7 @@ class InputReviewDialog(QDialog):
         self._update_confirm()
 
     def _apply_answer(self, f, answer):
-        if f.field in ("conflict", "intent") and answer == "自定义输入":
+        if answer == "自定义输入":        # 等医生在下面输入框里填具体内容
             return
         if f.field == "conflict":
             return
@@ -305,6 +306,16 @@ class InputReviewDialog(QDialog):
                        "今天": ("今天", "normalized")}
             if answer in mapping:
                 target.normalized, target.status = mapping[answer]
+        elif f.field == "horizon":
+            mapping = {"1 年": "12个月", "3 年": "36个月", "5 年": "60个月"}
+            if answer in mapping:
+                target.normalized, target.status = mapping[answer], "normalized"
+            else:
+                m = re.match(r"(\d+)\s*(年|个月|月)", str(answer))
+                if m:
+                    n = int(m.group(1))
+                    target.normalized = ("%d个月" % (n * 12)) if m.group(2) == "年" else ("%d个月" % n)
+                    target.status = "normalized"
         elif f.field == "outcome":
             mapping = {"总生存 OS": ("总生存OS", "normalized"),
                        "复发 RFS": ("复发", "normalized"),

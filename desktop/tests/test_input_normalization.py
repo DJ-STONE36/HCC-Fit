@@ -238,6 +238,16 @@ def case_ai_layer_removed():
     return "AI 候选层已移除（模块与函数都不存在）"
 
 
+
+def case_horizon_followup():
+    no_h = RULES.extract("HCC，准备肝切除，从手术日起预测复发")
+    assert "q_horizon" in {f.id for f in no_h.followups}
+    yes_h = RULES.extract("HCC，准备肝切除，从手术日起预测三年复发")
+    assert "q_horizon" not in {f.id for f in yes_h.followups}
+    return "缺预测范围才追问；写了 3 年就不问"
+
+
+
 def main():
     check("HCC 术前 一年复发", case_hcc_preop)
     check("疑似 HCC 未治疗 看预后", case_suspected_no_treatment)
@@ -249,6 +259,7 @@ def main():
     check("追问抑制（原话已足够）", case_followup_suppression)
     check("空格软切分/保护短语", case_space_split)
     check("空格分隔文本解析", case_space_extraction)
+    check("预测范围追问", case_horizon_followup)
     check("带空格的范围与 OS", case_spaced_horizon)
     check("输入会话落盘/重载", case_save_load)
     check("确认门禁/版本", case_confirm_gate)

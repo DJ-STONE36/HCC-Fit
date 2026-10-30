@@ -884,6 +884,12 @@ class RuleExtractor:
                 "q_start", "start_point",
                 "预测范围从手术日、治疗日开始，还是从今天起算？",
                 ["手术日", "治疗日", "今天", "不知道"]))
+        h = session.fields["horizon"]
+        if not field_sufficient(session, "horizon"):
+            session.followups.append(Followup(
+                "q_horizon", "horizon",
+                "想预测多长时间内的结局？（这决定模型/时点是否适用）",
+                ["1 年", "3 年", "5 年", "自定义输入", "不知道"]))
         o = session.fields["outcome"]
         if o.status in ("unknown", "ambiguous", "conflict") and not field_sufficient(session, "outcome"):
             session.followups.append(Followup(
