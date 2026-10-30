@@ -248,12 +248,10 @@ class MainWindow(QMainWindow):
         self.key_warn.setStyleSheet("color:#c0392b;font-size:9pt;")
         bv.addWidget(self.key_warn)
         self.key.textChanged.connect(self._check_key)
-        self.base = QLineEdit("https://sciencepal.ai")
-        self.agent = QLineEdit("HCC-Fit")
-        bv.addWidget(QLabel("Base"))
-        bv.addWidget(self.base)
-        bv.addWidget(QLabel("Agent"))
-        bv.addWidget(self.agent)
+        built = QLabel("连接：https://sciencepal.ai　·　Agent：HCC-Fit（内置，无需填写）")
+        built.setWordWrap(True)
+        built.setStyleSheet("color:#66727f;font-size:9pt;")
+        bv.addWidget(built)
         ph = QHBoxLayout()
         self.probe_btn = QPushButton("测试连接 / 看 Agent")
         self.probe_btn.clicked.connect(self.probe)
@@ -446,7 +444,7 @@ class MainWindow(QMainWindow):
             return
         mode = self.current_mode()
         sp = mode in ("sciencepal", "sciencepal_hcc")
-        for w in (self.key, self.base, self.agent, self.probe_btn):
+        for w in (self.key, self.probe_btn):
             w.setEnabled(sp)
         if mode == "sciencepal_hcc":
             self.badge.setText("SciencePal · HCC-Fit 报告")
@@ -636,8 +634,6 @@ class MainWindow(QMainWindow):
     def _launch_worker(self, mode, scenario, names, ws):
         opts = {
             "api_key": self.key.text().strip(),
-            "base": self.base.text().strip() or "https://sciencepal.ai",
-            "agent_name": self.agent.text().strip() or "HCC-Fit",
             "timeout": 240 if mode == "sciencepal_hcc" else 180,
         }
         self.thread = QThread(self)
@@ -1049,9 +1045,7 @@ class MainWindow(QMainWindow):
         self.probe_msg.setText("测试中…")
         ws = paths.workspace("probe")
         self.probe_thread = QThread(self)
-        self.probe_worker = ProbeWorker(str(ws), self.key.text().strip(),
-                                        self.base.text().strip() or "https://sciencepal.ai",
-                                        self.agent.text().strip() or "HCC-Fit")
+        self.probe_worker = ProbeWorker(str(ws), self.key.text().strip(), "", "")
         self.probe_worker.moveToThread(self.probe_thread)
         self.probe_thread.started.connect(self.probe_worker.run)
         self.probe_worker.result.connect(self._on_probe)
@@ -1112,8 +1106,6 @@ class MainWindow(QMainWindow):
         idx = self.mode.findData(mode)
         if idx >= 0:
             self.mode.setCurrentIndex(idx)
-        self.base.setText(s.value("base", "https://sciencepal.ai"))
-        self.agent.setText(s.value("agent", "HCC-Fit"))
         self.patient.setPlainText(s.value("patient", ""))
         self.task.setPlainText(s.value("task", ""))
         self.outcome.setText(s.value("outcome", "1 年内复发"))
@@ -1127,8 +1119,6 @@ class MainWindow(QMainWindow):
     def _save_settings(self):
         s = QSettings("HCC-Fit", "Desktop")
         s.setValue("mode", self.current_mode())
-        s.setValue("base", self.base.text())
-        s.setValue("agent", self.agent.text())
         s.setValue("patient", self.patient.toPlainText())
         s.setValue("task", self.task.toPlainText())
         s.setValue("outcome", self.outcome.text())

@@ -31,6 +31,10 @@ import uuid
 from brains import Brain, BrainError
 
 DEFAULT_BASE = "https://sciencepal.ai"
+# 2026-10-30 实测可用的自定义 Agent「HCC-Fit」；内置后界面不再要求填 Base/Agent。
+# 如需换 Agent：设环境变量 SCIENCEPAL_AGENT_ID（传空字符串则回退按名称查找/平台自动路由）。
+DEFAULT_AGENT_ID = "61033129-3c47-4e72-885d-bcd4bb3e280a"
+DEFAULT_AGENT_NAME = "HCC-Fit"
 
 TEXT_FIELDS = {"prompt", "message", "query", "content", "input", "text", "question"}
 ID_FIELDS = {"agent_id", "agentId", "agent"}
@@ -62,12 +66,16 @@ class SciencePalBrain(Brain):
     available = True
 
     def __init__(self, workspace, api_key=None, base=None, agent_name=None, timeout=180,
-                 strict_agent=False, **opts):
+                 strict_agent=False, agent_id=None, **opts):
         super().__init__(workspace, **opts)
         raw_key = (api_key or os.environ.get("SCIENCEPAL_API_KEY") or "")
         self.key, self._key_issue = _clean_key(raw_key)
-        self.base = (base or DEFAULT_BASE).rstrip("/")
-        self.agent_name = agent_name or "HCC-Fit"
+        self.base = (base or os.environ.get("SCIENCEPAL_BASE_URL") or DEFAULT_BASE).rstrip("/")
+        self.agent_name = agent_name or DEFAULT_AGENT_NAME
+        # 内置 Agent ID；显式传 "" 或设置 SCIENCEPAL_AGENT_ID="" 可关掉内置、改回按名称查找
+        if agent_id is None:
+            agent_id = os.environ.get("SCIENCEPAL_AGENT_ID", DEFAULT_AGENT_ID)
+        self.agent_id = str(agent_id or "").strip()
         self.timeout = timeout
         self.strict_agent = strict_agent      # 单次核查模式：找不到指定 Agent 就报错，不静默自动路由
         self._thread_id = None
@@ -205,6 +213,19 @@ class SciencePalBrain(Brain):
         items = body.get("agents") or body.get("items") or body.get("data") or []
         names = [a.get("name") for a in items if isinstance(a, dict)]
         real = [n for n in names if n]
+        if self.agent_id:
+            ids = [str(a.get("id") or a.get("agent_id") or "") for a in items if isinstance(a, dict)]
+            if any(i == self.agent_id for i in ids):
+                name = next((a.get("name") for a in items
+                             if isinstance(a, dict)
+                             and str(a.get("id") or a.get("agent_id") or "") == self.agent_id), self.agent_name)
+                return True, "内置 Agent 可用：「%s」（%s）（Key %s）" % (
+                    name or self.agent_name, self.agent_id[:8] + "…", self.key_summary()), real
+            if real:
+                return False, ("Key 可见的 Agent 里没有内置 ID %s…；可见：%s。"
+                               "如需换 Agent，设环境变量 SCIENCEPAL_AGENT_ID"
+                               % (self.agent_id[:8], "、".join(real[:8]))), real
+            return True, "能连上；/api/agents 未列出 Agent（将按内置 ID 直接调用）（Key %s）" % self.key_summary(), real
         hit = any((n or "").strip().lower() == self.agent_name.strip().lower() for n in names)
         if not real:
             hint = "能连上；/api/agents 没列出 Agent，将走平台自动路由（不影响使用）"
@@ -220,6 +241,8 @@ class SciencePalBrain(Brain):
         return [a.get("name") for a in items if isinstance(a, dict) and a.get("name")]
 
     def _agent_id(self):
+        if self.agent_id:
+            return self.agent_id          # 内置/显式指定：不再查 /api/agents
         if self._agent_id_cache is not None:
             return self._agent_id_cache
         status, body = self._json("GET", "/api/agents")
@@ -337,6 +360,15 @@ class SciencePalBrain(Brain):
                                  % json.dumps(resp, ensure_ascii=False)[:300])
             if status == 401:
                 raise BrainError("401：Key 无效或未被授权")
+            if status in (403, 404) and payload.get("agent_id"):
+                # 这个 Key 用不了内置/指定的 Agent：退回按名称查找或平台自动路由
+                self._log("agent %s 不可用（HTTP %s），改为按名称/自动路由重试"
+                          % (payload.get("agent_id"), status))
+                self.agent_id = ""
+                self._agent_id_cache = None
+                for k in ("agent_id", "agent_select_type", "agent_selection_explicit"):
+                    payload.pop(k, None)
+                continue
             if status == 422:
                 missing = self._missing_fields(resp)
                 need = [m for m in missing if m not in payload]

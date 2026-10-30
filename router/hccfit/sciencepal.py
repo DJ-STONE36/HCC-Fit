@@ -324,16 +324,56 @@ def filter_papers(scenario: dict, papers: list[dict], timeout_s: int = 90,
     return {**res, "parsed": parsed, "auto_agent": auto_name}
 
 
-def _parse(text: str):
-    s = (text or "").strip()
-    if "```" in s:
-        s = s.split("```")[1]
-        if s.startswith("json"):
-            s = s[4:]
-    i, j = s.find("{"), s.rfind("}")
-    if i < 0 or j < 0:
-        return None
+def _is_filter_result(obj) -> bool:
+    return isinstance(obj, dict) and ("keep" in obj or "drop" in obj)
+
+
+def _try_json(text: str):
     try:
-        return json.loads(s[i:j + 1])
+        return json.loads(text)
     except Exception:
         return None
+
+
+def _iter_json_objects(text: str):
+    """从混杂文本里逐个抠出可解析的 JSON 对象（agent 会掺 skills/usage 等噪音）。"""
+    decoder = json.JSONDecoder()
+    i = 0
+    while True:
+        i = text.find("{", i)
+        if i < 0:
+            return
+        try:
+            obj, end = decoder.raw_decode(text[i:])
+        except Exception:
+            i += 1
+            continue
+        yield obj
+        i += end
+
+
+def _parse(text: str):
+    """从回答里找 filter 结果：优先 ```json 代码块，其次逐个扫描对象，最后整段兜底。"""
+    s = (text or "").strip()
+    if not s:
+        return None
+    # 1) 代码块（可能不止一个）
+    parts = s.split("```")
+    for idx in range(1, len(parts), 2):
+        block = parts[idx].strip()
+        if block.lower().startswith("json"):
+            block = block[4:].strip()
+        obj = _try_json(block)
+        if _is_filter_result(obj):
+            return obj
+    # 2) 逐个扫描（跳过 skills/usage/choices 等噪音对象）
+    found = [o for o in _iter_json_objects(s) if _is_filter_result(o)]
+    if found:
+        return found[-1]
+    # 3) 整段首尾大括号兜底
+    i, j = s.find("{"), s.rfind("}")
+    if i >= 0 and j > i:
+        obj = _try_json(s[i:j + 1])
+        if _is_filter_result(obj):
+            return obj
+    return None

@@ -282,5 +282,26 @@ class AgentClientTests(unittest.TestCase):
         self.assertTrue(any("回退算法" in w for w in out["warnings"]), out["warnings"])
 
 
+    def test_parse_noisy_answer(self):
+        # agent 会在答案里掺 skills/usage 等 JSON，还可能有代码块
+        noisy = ("I will evaluate.\n"
+                 '{"skills":[{"name":"x"}],"next_offset":null}\n'
+                 '```json\n'
+                 '{"keep":[{"pmid":"1","fit":2,"reason":"ok"}],"drop":[]}\n'
+                 '```\n'
+                 '{"model":"m","usage":{"total_tokens":1}}')
+        got = sciencepal._parse(noisy)
+        self.assertEqual(got["keep"][0]["pmid"], "1")
+
+    def test_parse_scan_without_fence(self):
+        text = '前置说明 {"skills":[]} 然后 {"keep":[],"drop":[{"pmid":"9","reason":"no"}]} 结束'
+        got = sciencepal._parse(text)
+        self.assertEqual(got["drop"][0]["pmid"], "9")
+
+    def test_parse_garbage_returns_none(self):
+        self.assertIsNone(sciencepal._parse("只有文字，没有 JSON"))
+        self.assertIsNone(sciencepal._parse(""))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

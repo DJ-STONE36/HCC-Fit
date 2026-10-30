@@ -17,8 +17,9 @@ export SCIENCEPAL_API_KEY=sp_live_xxx
 export SCIENCEPAL_BASE_URL=https://sciencepal.ai
 # 可选：模型 id 必须来自 /api/billing/available-models；留空=平台默认（推荐）
 export SCIENCEPAL_MODEL=
-# balanced 需要：真实 filter agent UUID；留空则 balanced 明确降级为 fast
-export SCIENCEPAL_FILTER_AGENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+# 可选：filter agent 已内置（HCC-Fit，61033129-…-280a）；显式设置可覆盖，
+# 设为空字符串则关闭内置、退回自动发现/降级
+# export SCIENCEPAL_FILTER_AGENT_ID=
 
 # 可选：服务鉴权。默认留空 = 不鉴权（本机使用无需 token）
 export HCCFIT_ROUTER_TOKEN=

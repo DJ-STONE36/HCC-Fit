@@ -24,11 +24,12 @@ def check(name, fn):
         print("FAIL  %-38s %s: %s" % (name, type(exc).__name__, exc))
 
 
-def _brain():
+def _brain(agent_id=None):
     ws = BASE / "tests" / "_tmp_sp"
     shutil.rmtree(ws, ignore_errors=True)
     ws.mkdir(parents=True, exist_ok=True)
-    return SciencePalBrain(str(ws), api_key="sp-test", timeout=5), ws
+    kwargs = {} if agent_id is None else {"agent_id": agent_id}
+    return SciencePalBrain(str(ws), api_key="sp-test", timeout=5, **kwargs), ws
 
 
 def case_asked():
@@ -76,7 +77,7 @@ def case_http_hints():
 
 def case_initiate_params():
     import json as _json
-    brain, ws = _brain()
+    brain, ws = _brain(agent_id="")   # 关掉内置，测试按名称查找
     try:
         sent = {}
 
@@ -99,11 +100,35 @@ def case_initiate_params():
     return "initiate 带 agent_id / agent_select_type"
 
 
+
+def case_builtin_agent_id():
+    import json as _json
+    brain, ws = _brain()          # 默认：内置 agent id
+    try:
+        sent = {}
+
+        def fake_req(method, path, data=None, headers=None, timeout=None):
+            if path == "/api/agents":
+                raise AssertionError("内置 Agent 时不应再查 /api/agents")
+            if path == "/api/agent/initiate":
+                sent["body"] = data or b""
+                return 200, _json.dumps({"thread_id": "t1", "agent_run_id": "r1"})
+            return 200, "{}"
+
+        brain._req = fake_req
+        brain._initiate("hello", [])
+        assert b"61033129" in sent["body"], sent["body"][:300]
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+    return "默认直接使用内置 Agent ID（不查列表）"
+
+
 def main():
     check("追问 asked", case_asked)
     check("失败终态", case_failed)
     check("HTTP 错误提示", case_http_hints)
     check("initiate 参数", case_initiate_params)
+    check("内置 Agent ID", case_builtin_agent_id)
     ok = sum(1 for r in RESULTS if r)
     print("\n%d/%d 通过" % (ok, len(RESULTS)))
     return 0 if ok == len(RESULTS) else 1

@@ -99,7 +99,7 @@ POST /api/thread/{thread_id}/agent/start
 | 官方规则 | 实现位置 | 说明 |
 |---|---|---|
 | Base + Bearer | `SciencePalBrain._req` | 默认 `https://sciencepal.ai`，路径拼 `/api/...`；Key 先清洗不可见字符 |
-| 发现 Agent | `_agent_id()` → `GET /api/agents`（按名称匹配） | 找不到时自动路由；`strict_agent=True`（单次核查）则报错 |
+| 发现 Agent | `_agent_id()` 直接返回内置 `DEFAULT_AGENT_ID`（HCC-Fit） | 不查 `/api/agents`；`SCIENCEPAL_AGENT_ID` 可覆盖，设空则退回按名称查找；403/404 自动降级为名称/平台路由 |
 | initiate | `_initiate()` | multipart form 优先（支持附件）；422 缺字段自愈后重试；再退 JSON；带 `agent_id` + `agent_selection_explicit` + `agent_select_type=manual` |
 | 读流 | `_replay_stream(after_index=0)` | 轮询完成后从头重放；按工具事件分段取最后一段正文 |
 | 终态 | `_poll()` | completed/finished → 取正文；failed/error/stopped → 报错；**asked → 明确报错**（不空等） |
@@ -111,7 +111,7 @@ POST /api/thread/{thread_id}/agent/start
 
 | 官方规则 | 实现位置 | 说明 |
 |---|---|---|
-| initiate | `run_agent()` | form-data：`agent_id/prompt/stream=true/agent_select_type=manual`；`model_name` 仅在配置了 `SCIENCEPAL_MODEL` 时传 |
+| initiate | `run_agent()` | form-data：`agent_id/prompt/stream=true/agent_select_type=manual`；`agent_id` 默认取 `DEFAULT_FILTER_AGENT_ID`（HCC-Fit）；`model_name` 仅在配置时传 |
 | 读流 | `_stream_text(after_index=0)` | 立刻订阅 + 从头重放；跳过 status/tool 事件；`[DONE]` 结束 |
 | 终态 | `_wait_terminal()` | completed/finished；failed/error/stopped → 报错；asked → 明确报错 |
 | 回退 | `_answer_from_run()` / 再重放 | 流为空时先看 run 里的 messages，再重放一次 |
