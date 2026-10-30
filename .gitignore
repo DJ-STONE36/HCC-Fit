@@ -5,7 +5,8 @@ desktop/build/
 desktop/smoke_out/
 desktop/smoke_data/
 desktop/tests/_tmp*/
-_smoke_exe*/
+_smoke*/
+_iso/
 __pycache__/
 *.py[cod]
 *.egg-info/

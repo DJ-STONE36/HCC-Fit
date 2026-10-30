@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-"""方案 A：可选 PubMed 候选检索。不改 S1，不下载全文。"""
+"""方案 A：可选 PubMed 候选检索。内置引擎，一键检索；不改 S1，不下载全文。"""
 from __future__ import annotations
 
 import os
 import time
-from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -15,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import paths
-from app.router_client import RouterWorker
+from app.router_client import ENGINES, RouterWorker
 
 
 class RouterDialog(QDialog):
@@ -28,37 +27,67 @@ class RouterDialog(QDialog):
         self.papers = []
 
         self.setWindowTitle("先找候选论文（PubMed）")
-        self.resize(1040, 680)
+        self.resize(1040, 700)
         lay = QVBoxLayout(self)
 
-        lay.addWidget(QLabel("Router 地址（需先启动 HCC-Fit_Simple_Router）"))
-        row = QHBoxLayout()
+        # ---- 运行方式：默认内置，一键检索，不需要单独启动服务 ----
+        lay.addWidget(QLabel("检索方式"))
+        top = QHBoxLayout()
+        self.engine = QComboBox()
+        for label, value in ENGINES:
+            self.engine.addItem(label, value)
+        # 老用户如果显式设了 HCCFIT_ROUTER_URL，默认走外部服务
+        if os.environ.get("HCCFIT_ROUTER_URL"):
+            idx = self.engine.findData("http")
+            if idx >= 0:
+                self.engine.setCurrentIndex(idx)
+        self.engine.currentIndexChanged.connect(self._refresh_engine)
+        top.addWidget(self.engine)
+
+        self.external_row = QWidget()
+        ext = QHBoxLayout(self.external_row)
+        ext.setContentsMargins(0, 0, 0, 0)
         self.url = QLineEdit(os.environ.get("HCCFIT_ROUTER_URL", "http://127.0.0.1:8080"))
         self.token = QLineEdit()
         self.token.setEchoMode(QLineEdit.EchoMode.Password)
         self.token.setPlaceholderText("Router token（可选）")
+        ext.addWidget(QLabel("地址"))
+        ext.addWidget(self.url, 3)
+        ext.addWidget(self.token, 2)
+        top.addWidget(self.external_row, 1)
+        lay.addLayout(top)
+
+        self.engine_msg = QLabel("")
+        self.engine_msg.setWordWrap(True)
+        self.engine_msg.setStyleSheet("color:#66727f;font-size:9pt;")
+        lay.addWidget(self.engine_msg)
+
+        # ---- 检索参数：一键即可，Key 只放内存 ----
+        row = QHBoxLayout()
         self.sp_key = QLineEdit()
         self.sp_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.sp_key.setPlaceholderText("SciencePal Key（仅 balanced）")
+        self.sp_key.setPlaceholderText("SciencePal Key（仅 balanced；只放内存）")
+        self.filter_agent = QLineEdit()
+        self.filter_agent.setPlaceholderText("filter agent ID（仅 balanced，可选）")
         self.strategy = QComboBox()
         self.strategy.addItem("fast（5–10 秒）", "fast")
         self.strategy.addItem("balanced（60–90 秒）", "balanced")
         self.k = QSpinBox()
         self.k.setRange(1, 8)
         self.k.setValue(8)
-        row.addWidget(self.url, 3)
-        row.addWidget(self.token, 2)
+        self.search_btn = QPushButton("一键检索候选")
+        self.search_btn.clicked.connect(self.search)
         row.addWidget(self.sp_key, 2)
+        row.addWidget(self.filter_agent, 2)
         row.addWidget(self.strategy)
         row.addWidget(QLabel("k"))
         row.addWidget(self.k)
-        self.search_btn = QPushButton("搜索")
-        self.search_btn.clicked.connect(self.search)
         row.addWidget(self.search_btn)
         lay.addLayout(row)
 
         self.status = QLabel("只做候选发现；题录/摘要不是全文，S2 四维核查仍需 PDF。"
-                             " balanced 需要 SciencePal Key（可填上方，或配在 Router 服务端）。")
+                             " balanced 需要 SciencePal Key（可填上方或配在环境变量），"
+                             "以及 filter agent ID。")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color:#8a5a00;background:#fff5e0;border:1px solid #f0dcb0;"
                                   "border-radius:6px;padding:6px;")
@@ -94,28 +123,50 @@ class RouterDialog(QDialog):
         bar.addWidget(self.add_btn)
         lay.addLayout(bar)
 
-    def _selected_papers(self):
-        out = []
-        for row in range(self.table.rowCount()):
-            cell = self.table.item(row, 0)
-            if cell and cell.checkState() == Qt.CheckState.Checked:
-                p = cell.data(Qt.ItemDataRole.UserRole)
-                if p:
-                    out.append(p)
-        return out
+        self._refresh_engine()
 
+    # ---------------- 运行方式 ----------------
+    def current_engine(self) -> str:
+        return self.engine.currentData() or "builtin"
+
+    def _refresh_engine(self):
+        builtin = self.current_engine() == "builtin"
+        self.external_row.setVisible(not builtin)
+        if not builtin:
+            self.engine_msg.setText("外部服务：需先启动 HCC-Fit_Simple_Router；"
+                                    "不想启动服务就选“内置引擎”。")
+            self.search_btn.setEnabled(True)
+            return
+        from app.router_engine import engine_status
+        st = engine_status()
+        if not st["available"]:
+            self.engine_msg.setText("内置引擎不可用：%s" % st.get("error"))
+            self.search_btn.setEnabled(False)
+            return
+        self.search_btn.setEnabled(True)
+        self.engine_msg.setText(
+            "内置引擎可用（%s）· 策略 %s · SciencePal Key %s · filter agent %s"
+            % (st.get("path") or "?", "/".join(st.get("strategies") or []),
+               "已配置" if st.get("sciencepal_configured") else "未配置（balanced 请在上方填写）",
+               "已配置" if st.get("filter_configured") else "未配置（balanced 会降级为 fast）"))
+
+    # ---------------- 检索 ----------------
     def search(self):
         if self.thread is not None:
             return
-        if not self.url.text().strip():
-            QMessageBox.warning(self, "缺少地址", "请填写 Router 地址。")
+        engine = self.current_engine()
+        if engine == "http" and not self.url.text().strip():
+            QMessageBox.warning(self, "缺少地址", "外部服务模式需要填写 Router 地址。")
             return
         self.search_btn.setEnabled(False)
-        self.status.setText("检索中…")
+        self.status.setText("检索中…（%s）" % ("内置引擎，无需服务" if engine == "builtin" else "外部服务"))
         self.thread = QThread(self)
-        self.worker = RouterWorker(self.url.text().strip(), self.token.text().strip(),
-                                   self.scenario, self.strategy.currentData(), self.k.value(),
-                                   self.sp_key.text().strip())
+        self.worker = RouterWorker(
+            self.scenario, self.strategy.currentData(), self.k.value(),
+            self.sp_key.text().strip(), engine=engine,
+            base_url=self.url.text().strip(), token=self.token.text().strip(),
+            filter_agent_id=self.filter_agent.text().strip(),
+        )
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.done.connect(self._on_done)
@@ -161,8 +212,9 @@ class RouterDialog(QDialog):
         degraded = (data.get("meta") or {}).get("degraded")
         self.warn.setPlainText("\n".join(warnings) or ("已降级：SciencePal 不可用" if degraded else "无警告"))
         used = data.get("strategy_used") or ""
-        self.status.setText("返回 %d 篇，实际策略：%s；勾选后保存，再回论文区添加 PDF。"
-                            % (len(self.papers), used or "—"))
+        self.status.setText("返回 %d 篇，实际策略：%s（%s）；勾选后保存，再回论文区添加 PDF。"
+                            % (len(self.papers), used or "—",
+                               "内置引擎" if self.current_engine() == "builtin" else "外部服务"))
         self.add_btn.setEnabled(bool(self.papers))
         if not self.papers:
             self.status.setText("没有找到候选；可改用 fast、放宽条件，或直接在论文区添加 PDF。")
@@ -172,6 +224,7 @@ class RouterDialog(QDialog):
         self.status.setText("检索失败：%s" % msg)
         self.warn.setPlainText(msg)
 
+    # ---------------- 候选操作 ----------------
     def _row_paper(self):
         row = self.table.currentRow()
         if row < 0:
@@ -226,6 +279,16 @@ class RouterDialog(QDialog):
         path.write_text("\n".join(lines), encoding="utf-8")
         self.candidate_path = str(path)
         self.accept()
+
+    def _selected_papers(self):
+        out = []
+        for row in range(self.table.rowCount()):
+            cell = self.table.item(row, 0)
+            if cell and cell.checkState() == Qt.CheckState.Checked:
+                p = cell.data(Qt.ItemDataRole.UserRole)
+                if p:
+                    out.append(p)
+        return out
 
     def closeEvent(self, event):
         if self.thread is not None:

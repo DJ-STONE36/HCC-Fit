@@ -19,6 +19,8 @@
 > 说明：原文标题写的是 PyQt，实现统一用 **PySide6**；两者控件/信号写法几乎一致，差异主要在 import 和少量枚举。
 
 > **P0–P4（Windows）已落地（2026-10-29）**：桌面版在 `hccfit_desktop/`，三栏窗口、5 种模式、真实 SciencePal 单次核查（含二次 JSON 修复）、四维/证据强度/引文/注意点/原始返回、人工工作区入口、运行计时、PDF（含 Markdown 结论）/JSON 导出、offscreen 冒烟测试均通过；PyInstaller one-dir 已产出 `dist/HCC-Fit/HCC-Fit.exe`（约 114MB），`--smoke` 退出码 0。下一步：Windows 安装包/签名（可选）→ macOS/Linux 适配。
+>
+> **2026-10-30 更新**：大脑模式从 5 种减到 **2 种**（SciencePal 五阶段 / HCC 单次），“演示(stub) / 本地模拟(mock_sp) / 人工中转(manual)”按用户要求从界面移除（stub 仅留给自动化测试）；Router 改为**内置进程内引擎**（`app/router_engine.py`），一键检索、无需启动服务。下文涉及这 3 种模式与“单独起 Router”的描述已作废，保留作历史记录。
 
 ---
 

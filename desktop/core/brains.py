@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-brains.py — 三种"大脑"，同一条流水线可替换。
+brains.py — "大脑"抽象，同一条流水线可替换。
 
-1) StubBrain   : 不联网、确定性演示（默认）。所有产出都标 demo，用于先把链路跑通。
-2) ManualBrain : 把每一阶段的提示写到工作区，等人/别的窗口把 JSON 放回来（离线可用的"人工大脑"）。
-3) SciencePalBrain（见 sciencepal.py）: 调平台的 Agent / 检索 / 沙盒。
+1) SciencePalBrain（见 sciencepal.py）：产品模式，调平台的 Agent / 检索 / 沙盒。
+2) StubBrain   : 不联网、确定性输出；界面已不提供，只留给自动化测试跑链路。
+
+（2026-10-30 按用户要求移除 ManualBrain“人工中转”。）
 
 契约：run_stage(stage, payload) -> dict（结构见 planner.STAGE_SPECS）。
 """
@@ -12,9 +13,7 @@ brains.py — 三种"大脑"，同一条流水线可替换。
 from __future__ import annotations
 
 import hashlib
-import json
 import os
-import time
 
 
 class BrainError(RuntimeError):
@@ -22,7 +21,7 @@ class BrainError(RuntimeError):
 
 
 class Pending(RuntimeError):
-    """ManualBrain：还差人把结果放回来。"""
+    """历史人工模式遗留的“等结果”信号；planner 仍兼容捕获，正常不会抛出。"""
 
 
 def _h(text: str) -> int:
@@ -170,34 +169,11 @@ class StubBrain(Brain):
         raise BrainError("未知阶段：%s" % stage)
 
 
-class ManualBrain(Brain):
-    """离线人工大脑：写提示到工作区，读回 JSON。适合没有网络/没有 Key 时。"""
-
-    name = "manual"
-    available = True
-
-    def run_stage(self, stage: str, payload: dict) -> dict:
-        pdir = os.path.join(self.workspace, "manual")
-        os.makedirs(pdir, exist_ok=True)
-        ask = os.path.join(pdir, "%s.prompt.md" % stage)
-        ans = os.path.join(pdir, "%s.json" % stage)
-        if not os.path.exists(ask):
-            with open(ask, "w", encoding="utf-8") as fh:
-                fh.write("# 阶段：%s\n\n## 输入\n\n```json\n%s\n```\n\n"
-                         "把结果写到 %s（结构见 planner.STAGE_SPECS）。\n" % (stage, json.dumps(payload, ensure_ascii=False, indent=2), ans))
-        if not os.path.exists(ans):
-            raise Pending("等待人工结果：%s" % ans)
-        with open(ans, encoding="utf-8") as fh:
-            return json.load(fh)
-
-
 def build_brain(mode: str, workspace: str, **opts) -> Brain:
     mode = (mode or "stub").lower()
     if mode == "stub":
         return StubBrain(workspace, **opts)
-    if mode == "manual":
-        return ManualBrain(workspace, **opts)
     if mode == "sciencepal":
         from sciencepal import SciencePalBrain
         return SciencePalBrain(workspace, **opts)
-    raise BrainError("未知 mode：%s" % mode)
+    raise BrainError("未知 mode：%s（界面只支持 sciencepal / sciencepal_hcc）" % mode)

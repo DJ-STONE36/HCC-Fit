@@ -1,12 +1,12 @@
 # HCC-Fit 桌面版（PySide6）
 
-> P0–P4 + 输入层 P1 已完成：单输入场景卡、三栏窗口、5 种模式、真实 SciencePal 单次核查、四维/证据/原始返回、PDF/JSON 导出、人工工作区入口、Windows one-dir。
+> P0–P4 + 输入层 P1 已完成：单输入场景卡、三栏窗口、2 种大脑模式、内置 Router（一键检索）、真实 SciencePal 单次核查、四维/证据/原始返回、PDF/JSON 导出、人工工作区入口、Windows one-dir。
 > Web 版（`HCCFIT_APP`）保留作对照；桌面版复用它的 core，不再起 HTTP 服务。
 
 ## 运行
 
 ```bash
-pip install PySide6
+pip install PySide6 requests
 python main.py
 ```
 
@@ -15,12 +15,13 @@ python main.py
 ## 当前功能（P0–P4 + 输入层）
 
 - 场景：**一个自由输入框**（一段话）+ 解析后的可编辑场景卡；追问、确认后才进入核查；
-- 论文：拖拽或选择文件、粘贴关键段落；
-- 大脑：5 种模式（stub / sciencepal / sciencepal_hcc / mock_sp / manual）、Key、Base、Agent、测试连接；
+- 论文：拖拽或选择文件、粘贴关键段落、**内置 PubMed 候选检索**（无需启动服务）；
+- 大脑：2 种模式（SciencePal Agent 五阶段 / HCC-Fit 单次报告）、Key、Base、Agent、测试连接；
+  “演示 / 本地模拟 / 人工中转”已于 2026-10-30 按要求从界面移除；
 - 流程：五阶段或 HCC 单次核查的实时状态；
 - 结果：结论、四维表（含证据强度）、逐维理由与引文、论文/方案/期望、原始返回；
 - 二次 JSON 修复：首次返回 Markdown 时自动追问 JSON，成功后绿色提示，原始 Markdown 保留；
-- 运行计时、当前阶段、失败原因；“打开工作区”可看 `run.log` / `sp_raw/` / 人工文件；
+- 运行计时、当前阶段、失败原因；“打开工作区”可看 `run.log` / `sp_raw/`；
 - 导出：PDF（给人看，一页/两页 A4）与 JSON（`visit.json`，给 Agent）。
 
 ## 输入归一（P1 已完成；2026-10-30 补齐 P0 三项）
@@ -90,29 +91,34 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
 
 ![补充资料页签](docs/supplement_tab.png)
 
-## 可选：PubMed 候选（Router 方案 A）
+## PubMed 候选（Router 已内置，一键检索）
 
-论文区新增 **“先找候选论文（PubMed）”**：
+论文区的 **“找候选论文（内置 PubMed）”** 直接用桌面进程内的 Router 引擎
+（`app/router_engine.py` 调用 `hccfit.strategies.run`）：
 
-- 需要先单独启动 `HCC-Fit_Simple_Router`（默认 `http://127.0.0.1:8080`）；
-- Router 服务端仍需配置 `SCIENCEPAL_FILTER_AGENT_ID`，否则 `balanced` 会降级为 fast；
-- 打开对话框，选 `fast`（5–10 秒）或 `balanced`（60–90 秒），选 k（1–8）；
-- 可填 Router 的 `HCCFIT_ROUTER_TOKEN`（服务鉴权，可选）；
-- `balanced` 还可以在弹窗里填 **SciencePal Key**（只放内存，关闭窗口清空）；不填则用 Router 服务端的 `SCIENCEPAL_API_KEY`；
-- 勾选候选后，保存为 `router_candidates_*.md` 并加入论文列表；
+- **不需要单独启动服务、不占 8080、不需要 uvicorn**；打包时 `router/hccfit` 已随 exe 一起带走；
+- 打开对话框即显示引擎状态（是否可用、策略、Key / filter agent 是否配置）；
+- 选 `fast`（5–10 秒）或 `balanced`（60–90 秒），选 k（1–8），点 **“一键检索候选”**；
+- `balanced` 需要 **SciencePal Key**（弹窗内填写，只放内存，关闭清空）和 **filter agent ID**
+  （弹窗内可填，或配环境变量 `SCIENCEPAL_FILTER_AGENT_ID`）；缺 filter agent 会明确降级为 fast；
+- 勾选候选后保存为 `router_candidates_*.md` 并加入论文列表；
 - **这只是题录/摘要，不是全文**；S2 四维核查仍需 PDF 或正文；
 - 该步骤是**可选前置**，不替换 S1，五阶段 Agent 逻辑不变。
 
-环境变量：
+仍支持外部 HTTP 服务（多端共用/远程部署时）：对话框里把“检索方式”切到
+“外部 Router 服务（HTTP）”，或设：
 
 ```bash
 set HCCFIT_ROUTER_URL=http://127.0.0.1:8080
 ```
 
+开发态内置引擎默认找包内同级 `router/`；也可用 `HCCFIT_ROUTER_DIR` 指向别处。
+
 测试：
 
 ```bash
-python tests/test_router_client.py
+python tests/test_router_engine.py   # 内置引擎：状态/参数透传/错误映射/对话框 7 项
+python tests/test_router_client.py   # Router 场景映射
 ```
 
 ## 数据与密钥
@@ -127,12 +133,14 @@ python tests/test_router_client.py
 ## 测试
 
 ```bash
-python tests/smoke.py                 # 主窗口：确认场景卡 → stub → 导出 JSON/PDF → schema
-python tests/test_input_normalization.py  # 规则/冲突/追问抑制/空格切分/schema 15 项
-python tests/test_input_review.py         # 场景卡对话框（含“零追问”场景）
-python tests/test_supplement.py           # 补充资料拼接/落盘
-python tests/test_supplement_ui.py        # 补充重跑 + 新旧报告切换
-python tests/test_router_client.py        # Router 场景映射
+python tests/smoke.py                    # 主窗口：确认场景卡 → stub → 导出 JSON/PDF → schema
+python tests/test_input_normalization.py # 规则/冲突/追问抑制/空格切分/schema 15 项
+python tests/test_input_review.py        # 场景卡对话框（含“零追问”场景）
+python tests/test_supplement.py          # 补充资料拼接/落盘
+python tests/test_supplement_ui.py       # 补充重跑 + 新旧报告切换
+python tests/test_router_client.py       # Router 场景映射
+python tests/test_router_engine.py       # 内置 Router 引擎（状态/透传/错误/对话框）
+python tests/test_modes.py               # 大脑只剩 2 种；已移除模式明确报错
 ```
 
 ## 目录
@@ -148,6 +156,9 @@ hccfit_desktop/
 │   ├── input_normalization.py  单输入规则层（分句/术语/状态/追问抑制）
 │   ├── input_review.py         场景卡对话框
 │   ├── input_store.py          输入会话落盘
+│   ├── router_engine.py        内置 Router（进程内调用 hccfit.strategies.run）
+│   ├── router_client.py        场景映射 / HTTP 客户端 / 后台 Worker
+│   ├── router_dialog.py        候选论文对话框（内置/HTTP 两种检索方式）
 │   └── main_window.py          主窗口
 ├── core/              从 Web 版复制的业务模块（planner/sciencepal/contract/hcc_report…）
 ├── resources/terms.csv          术语/同义词表
@@ -162,17 +173,26 @@ pip install pyinstaller
 python -m PyInstaller --noconfirm HCC-Fit.spec
 ```
 
-产物：`dist/HCC-Fit/HCC-Fit.exe`（one-dir，约 114MB，整个 `HCC-Fit` 文件夹一起分发）。
+产物：`dist/HCC-Fit/HCC-Fit.exe`（one-dir，约 119MB，含内置 Router；整个 `HCC-Fit` 文件夹一起分发）。
 
-自检（不显示窗口：确认场景卡 → stub → 导出 PDF，并构造场景卡对话框）：
+自检（不显示窗口：确认场景卡 → stub → 导出 PDF → 场景卡对话框 → 内置 Router 可用性）：
 
 ```bat
 set QT_QPA_PLATFORM=offscreen
 HCC-Fit.exe --smoke
-echo %ERRORLEVEL%   :: 0 = OK
+echo %ERRORLEVEL%   :: 0 = OK（失败原因写到 AppLocalData\smoke.json）
 ```
 
-已验证：打包后的 exe 在 Windows / Qt 默认平台下 `--smoke` 退出码 0。
+只测内置 Router（会联网访问 PubMed，fast，取 3 篇）：
+
+```bat
+HCC-Fit.exe --router-smoke
+echo %ERRORLEVEL%   :: 0 = 检索成功；2 = 引擎不可用；3 = 检索失败
+```
+
+已验证：打包后的 exe 在 Windows 下 `--smoke` 退出码 0、`--router-smoke` 成功返回 3 篇候选。
+
+> 打包会把 `router/hccfit` 与 toolkit 冻进 exe，`desktop/` 和 `router/` 必须是同级目录再执行 PyInstaller。
 
 ## 后续
 

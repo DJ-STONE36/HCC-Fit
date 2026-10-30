@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QApplication
 
 from app import export
 from app.input_normalization import RuleExtractor
-from app.main_window import MainWindow
+from app.main_window import MODES, MainWindow
 
 
 def main():
@@ -30,7 +30,8 @@ def main():
     app.setApplicationName("HCC-Fit Desktop")
 
     win = MainWindow()
-    win.mode.setCurrentIndex(0)  # stub
+    assert [m for _, m in MODES] == ["sciencepal", "sciencepal_hcc"], MODES
+    win.select_mode("stub")  # 界面不提供；runner 保留给自动化测试
     raw = "58 岁男性，HBV 相关 HCC，8.2cm，Child-Pugh A，AFP 1210，准备肝切除，预测从手术日起一年复发"
     win.scene_input.setPlainText(raw)
     session = RuleExtractor(BASE / "resources" / "terms.csv").extract(raw)
@@ -62,13 +63,17 @@ def main():
     assert win.open_ws_btn.isEnabled()
     assert "完成" in win.stage_list.item(0).text() or "完成" in win.stage_list.item(1).text()
 
-    # 四维/单次模式的流程行
-    win.mode.setCurrentIndex(2)  # sciencepal_hcc
+    # 两种可选的“大脑”流程行（界面只剩这两种）
+    win.select_mode("sciencepal_hcc")
     assert win.stage_list.count() == 1, win.stage_list.count()
-    win.mode.setCurrentIndex(4)  # manual
-    assert not win.manual_hint.isHidden()
-    win.mode.setCurrentIndex(0)
+    win.select_mode("sciencepal")
     assert win.stage_list.count() == 5
+
+    # 内置 Router 引擎（无需启动服务）
+    from app.router_engine import engine_status
+    st = engine_status()
+    assert st["available"], st
+    assert "fast" in st["strategies"] and "balanced" in st["strategies"], st
 
     # JSON + schema
     tmp = BASE / "smoke_out" / uuid.uuid4().hex[:8]

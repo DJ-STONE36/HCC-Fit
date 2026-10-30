@@ -806,7 +806,7 @@ class SciencePalBrain(Brain):
 
     def run_stage(self, stage: str, payload: dict) -> dict:
         if not self.key:
-            raise BrainError("没有 API Key：请在界面填入，或把 mode 改成 stub/mock_sp/manual")
+            raise BrainError("没有 API Key：请在“3 · 大脑”里填入 SciencePal API Key")
         task, skeleton = self.STAGE_PROMPTS[stage]
         prompt = (
             self.CONTRACT

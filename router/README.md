@@ -91,6 +91,21 @@ python -m unittest discover -s tests -v
 - `meta.strategy_used` 只会是 `fast` 或 `balanced`；
 - `strategy_requested=auto` 时用 `meta.strategy_used` 判断实际策略。
 
+## 嵌入桌面版（进程内调用，2026-10-30 起默认）
+
+桌面版不再要求单独启动本服务：`desktop/app/router_engine.py` 直接
+
+```python
+import hccfit.strategies as strategies
+strategies.run(scenario, strategy="fast", k=8, deadline_ms=150000, ...)
+```
+
+- 开发态：桌面找包内同级 `router/`（`HCCFIT_ROUTER_DIR` 可覆盖）；
+- 打包态：`desktop/HCC-Fit.spec` 把 `hccfit` + `toolkit`（`run/validate/hcc_agent/multi_search/paper_search/sources`）
+  一起冻进 exe，依赖（`requests`、`xml.etree` 等）由 PyInstaller 静态分析收集；
+- 因此 **本目录是唯一源码**，桌面不复制第二份；
+- 多端/远程部署时仍可跑本服务（HTTP `/v1/search`），桌面在弹窗里切“外部服务”或设 `HCCFIT_ROUTER_URL`。
+
 ## 安全
 
 - 不在前端暴露 `SCIENCEPAL_API_KEY`；

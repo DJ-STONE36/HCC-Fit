@@ -3,14 +3,25 @@
 
 a = Analysis(
     ['main.py'],
-    pathex=['.', 'core'],
+    # ../router 及其 toolkit 子目录进搜索路径，让内置 Router 被静态分析（依赖才会被完整收集）
+    pathex=['.', 'core', '../router',
+            '../router/hccfit/toolkit', '../router/hccfit/toolkit/lib'],
     binaries=[],
     datas=[('resources', 'resources')],
-    hiddenimports=['brains', 'planner', 'sciencepal', 'contract', 'hcc_report', 'pdftext', 'mock_sciencepal', 'input_normalization', 'input_store', 'input_review', 'supplement', 'supplement_store', 'router_client', 'router_dialog'],
+    hiddenimports=[
+        'brains', 'planner', 'sciencepal', 'contract', 'hcc_report', 'pdftext',
+        'input_normalization', 'input_store', 'input_review', 'supplement',
+        'supplement_store', 'router_client', 'router_dialog', 'router_engine',
+        'requests',
+        # 内置 Router（app/router_engine.py 延迟导入）
+        'hccfit', 'hccfit.config', 'hccfit.scope', 'hccfit.sciencepal',
+        'hccfit.core', 'hccfit.strategies',
+        'run', 'validate', 'hcc_agent', 'multi_search', 'paper_search', 'sources',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['fastapi', 'uvicorn', 'pydantic'],
     noarchive=False,
     optimize=0,
 )

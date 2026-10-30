@@ -25,11 +25,9 @@ TIER = {
 }
 STRENGTH = {"strong": "强", "moderate": "中", "weak": "弱", "insufficient": "不足"}
 MODE_LABEL = {
-    "stub": "演示（不联网）",
+    "stub": "离线自检（非真实结论）",
     "sciencepal": "SciencePal Agent",
     "sciencepal_hcc": "SciencePal · HCC-Fit 单次报告",
-    "mock_sp": "SciencePal（本地模拟）",
-    "manual": "人工中转",
 }
 
 
@@ -107,7 +105,7 @@ def build_report_html(visit: dict, font_family: str = "Microsoft YaHei") -> str:
     parts.append('<div class="sub">%s · %s · visit_id：%s</div>' % (
         escape(MODE_LABEL.get(mode, mode)), escape(str(visit.get("created_at") or "")),
         escape(str(visit.get("visit_id") or ""))))
-    if mode in ("stub", "mock_sp"):
+    if mode == "stub":
         parts.append('<p class="warn"><b>演示数据，不是真实论文结论。</b></p>')
     if visit.get("parse_mode") == "text_fallback":
         parts.append('<p class="warn"><b>Agent 未按 JSON 返回</b>，以下为原文摘要；结论需人工判读。</p>')

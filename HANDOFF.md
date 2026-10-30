@@ -18,14 +18,15 @@
 | 可选 AI 候选 | ✅ **已按用户要求移除**（代码、界面、测试、构建配置） |
 | 追问 / 确认门禁 / 版本 +1 | ✅ **已实现“原话已有信息就不追问”**（`field_sufficient`） |
 | 空格短句切分 | ✅ **已实现**（硬标点 + 空格软切分，保护 `3 年`/`58 岁`/`非 HCC`/`Child-Pugh A`） |
+| 大脑模式 | ✅ **只剩 2 种**（五阶段 / HCC 单次）；“演示 / 本地模拟 / 人工中转”已从界面移除 |
 | 五阶段 SciencePal | ✅ 已接线；真实 Key 需自测 |
 | HCC-Fit 单次核查 | ✅ 已接线；真实 Key 需自测 |
 | 四维 / 证据 / 引文 / 注意点 / 原始返回 | ✅ |
 | PDF / JSON 导出 | ✅ |
 | 报告后补充资料 | ✅ 已改为“所需资料只读文本框 + 每条资料一条输入框”；全量重跑；新旧报告切换 |
-| Router 方案 A：先找候选论文 | ✅ 已加弹窗、候选列表、保存候选 md；**Router 服务未打包，需单独启动** |
-| Router 弹窗填 SciencePal Key | ✅ 已加；仅 balanced 用，关闭清空 |
-| Windows one-dir 构建 | ✅ `dist/HCC-Fit`（2026-10-30 已重建） |
+| Router 候选论文 | ✅ **已内置**：进程内调用 `hccfit.strategies.run`，一键检索，无需单独起服务 |
+| Router 弹窗填 SciencePal Key / filter agent | ✅ 已加；仅 balanced 用，关闭清空 |
+| Windows one-dir 构建 | ✅ `dist/HCC-Fit`（2026-10-30 已重建，含内置 Router 与 requests） |
 | macOS | ❌ 只有方案，未实施 |
 
 ### Simple Router（独立 FastAPI 服务）
@@ -113,7 +114,17 @@ python tests/test_input_review.py          # 场景卡 UI（含“零追问”�
 python tests/test_supplement.py
 python tests/test_supplement_ui.py
 python tests/test_router_client.py
+python tests/test_router_engine.py         # 7/7：内置 Router 引擎
+python tests/test_modes.py                 # 4/4：大脑只剩 2 种
 QT_QPA_PLATFORM=offscreen python tests/smoke.py
+```
+
+打包后自检（在 `desktop_build/HCC-Fit` 目录）：
+
+```bat
+set QT_QPA_PLATFORM=offscreen
+HCC-Fit.exe --smoke          :: 0 = OK；失败原因见 AppLocalData\smoke.json
+HCC-Fit.exe --router-smoke   :: 0 = 内置 Router 真实联网检索成功
 ```
 
 无窗口自检：
@@ -130,7 +141,12 @@ HCC-Fit.exe --smoke
 echo %ERRORLEVEL%
 ```
 
-### 3.3 Router 服务
+### 3.3 Router
+
+> 桌面版**已内置 Router**，正常使用不需要启动任何服务（见 4 节）。下面这些只在
+> 你用“外部 Router 服务（HTTP）”模式、或要给 Web/多端共用时才需要。
+
+测试：
 
 ```bash
 cd router
@@ -191,17 +207,21 @@ curl http://127.0.0.1:8080/healthz
  → 新 visit；旧 visit 保留，可切换
 ```
 
-### Router 方案 A
+### Router（已内置到桌面）
 
 ```
-桌面“先找候选论文”
- → RouterDialog
- → HTTP /v1/search（fast 或 balanced）
- → 候选表
- → 保存 router_candidates_*.md
- → 加入 desktop 的 files
+桌面“找候选论文（内置 PubMed）”
+ → RouterDialog（引擎状态：可用/Key/filter agent）
+ → app/router_engine.py → 进程内 hccfit.strategies.run（fast 或 balanced）
+ → 候选表 → 保存 router_candidates_*.md → 加入 desktop 的 files
  → S1 仍由 SciencePal Agent 选论文
 ```
+
+- 默认**进程内直连**：不用起 uvicorn、不占 8080、不需要 `HCCFIT_ROUTER_URL`；
+- 打包时 `router/hccfit` 作为数据进入 `_internal/router`，`app/router_engine.py` 依次找
+  `HCCFIT_ROUTER_DIR` → `_MEIPASS/router` → `desktop/../router` → `cwd/router`；
+- 仍保留外部 HTTP 模式（对话框切换或设 `HCCFIT_ROUTER_URL`），供多端/远程部署；
+- `router/` 仍是同一份源码：桌面只是**导入**它，没有复制第二份。
 
 **不是 Router 替换 S1**；候选只是题录/摘要，S2 仍需 PDF/正文。
 
@@ -238,9 +258,11 @@ curl http://127.0.0.1:8080/healthz
    - 默认 filter agent ID 已去掉全零占位；
    - 需真实 `SCIENCEPAL_FILTER_AGENT_ID` + Key 跑一次 balanced，确认 `degraded=false`。
 
-5. **Router 是否继续独立 HTTP 服务（待决策）**
-   - 现状：可选前置，不替换 S1；候选 `.md` 只是摘要/题录；Router 服务不在 Windows 测试 zip 内；
-   - 二选一：保持 HTTP sidecar，或改成直接 `import hccfit.strategies.run`（单 exe、无 8080）。
+5. ~~Router 是否继续独立 HTTP 服务~~ ✅ **已定：内置进程内引擎**
+   - `app/router_engine.py` 直接 `import hccfit.strategies` 并调用 `run()`；界面“检索方式”默认内置；
+   - 打包时 `router/hccfit` 作为数据进 one-dir；开发态找包内同级 `router/`；
+   - 外部 HTTP 模式保留（切下拉或设 `HCCFIT_ROUTER_URL`），供多端/远程部署；
+   - 注意：`router/` 与 `desktop/` 必须是同级目录（打包/开发都依赖这个相对位置）。
 
 6. **Docker 未实际 build**
    - Dockerfile 已改非 root + healthcheck + `.dockerignore`，但本机没有 docker。
@@ -267,20 +289,17 @@ curl http://127.0.0.1:8080/healthz
 ## 7. 建议新会话的接手顺序
 
 1. 读 `HANDOFF.md`、`desktop/README.md`、`router/README.md`；
-2. 跑桌面 6 个测试 + `--smoke`（见 3.2）；
+2. 跑桌面 7 个测试 + `--smoke`（见 3.2）；
 3. 跑 Router 11 个测试；
 4. ~~先做用户最近要求的三项~~ ✅ 已完成（AI 移除 / 追问抑制 / 空格切分）；
-5. 再决定 Router：
-   - 保持 HTTP sidecar；
-   - 或改成直接 import `hccfit.strategies.run`（单 exe、无 8080）；
+5. ~~再决定 Router~~ ✅ 已定：**内置进程内引擎**，一键检索；外部 HTTP 仍可选；
 6. 真 Key 端到端（五阶段 + HCC 单次 + Router balanced）；
 7. 再考虑 macOS / 安装包 / 签名。
 
-### 判断“是否还要 Router 独立服务”
+### Router 形态（已决定）
 
-- 单机测试、想双击即用 → 推荐直接 import；
-- Web/多端共用、Router 独立升级 → 保留 HTTP；
-- 多用户 → 远程服务 + `HCCFIT_ROUTER_TOKEN`。
+- 默认：**进程内直连**（单 exe、无 8080、双击即用），这是当前实现；
+- 需要 Web/多端共用或 Router 独立升级时：切“外部 Router 服务（HTTP）”，多用户再加 `HCCFIT_ROUTER_TOKEN`。
 
 ---
 
@@ -290,9 +309,9 @@ curl http://127.0.0.1:8080/healthz
 - 追问抑制：`desktop/app/input_normalization.py` 的 `field_sufficient()` / `sufficient_fields()`
 - 分句：`desktop/app/input_normalization.py` 的 `split_sentences()` / `_split_soft()` / `_join_on_space()`
 - 补充资料：`desktop/app/supplement.py`、`desktop/app/main_window.py`
-- Router 客户端：`desktop/app/router_client.py`、`desktop/app/router_dialog.py`
+- 内置 Router：`desktop/app/router_engine.py`、`desktop/app/router_dialog.py`、`desktop/app/router_client.py`
 - 五阶段：`desktop/core/planner.py`、`desktop/core/sciencepal.py`
-- Router 服务：`router/hccfit/`
+- Router 服务：`router/hccfit/`（同一份源码，桌面直接 import，不复制）
 - 输入会话 schema：`desktop/resources/schemas/input_session.schema.json`
 - Router 检查报告：`docs/HCC-Fit_Simple_Router_检查报告_2026-10-29.md`
 - 输入归一方案：`docs/HCC-Fit_输入归一方案_2026-10-29.md`
@@ -313,7 +332,9 @@ curl http://127.0.0.1:8080/healthz
 | 术语表 | 新增 `treatment.transplant`（肝移植） |
 | 测试 | 输入归一 12 → 15 项（含 schema 校验、AI 已移除断言）；场景卡加零追问场景 |
 | 文档截图 | `desktop/docs/input_review.png` 重拍（7 列、显示“信息/足够”，无 AI 行） |
-| 构建 | PyInstaller one-dir 重建，`--smoke` 退出码 0 |
+| **大脑模式精简** | 界面只剩 `sciencepal` / `sciencepal_hcc`；删除 ManualBrain（人工中转）、mock_sp（本地模拟）与 mock_sciencepal.py；`stub` 只留给自动化测试（`select_mode("stub")`）；旧报告里的 manual/mock_sp 会明确报错而不是静默出演示数据；新增 `tests/test_modes.py`（4/4） |
+| **Router 内置** | 新增 `app/router_engine.py`（进程内 `hccfit.strategies.run`）；对话框“检索方式”默认内置、一键检索；spec 把 hccfit + toolkit 冻进 exe（`requests`/`xml.etree` 等依赖由静态分析收集）；外部 HTTP 仍可选；新增 `tests/test_router_engine.py`（7/7） |
+| 构建 | PyInstaller one-dir 重建（119MB，含 Router + requests）；`--smoke` 与 `--router-smoke` 均退出码 0（后者真实联网取回 3 篇 PubMed 候选） |
 | 版本控制 | 新增 git 基线（`.gitignore` 排除构建产物与运行期数据），便于后续 diff/回滚 |
 
 验证命令（在包根目录）：
@@ -321,7 +342,8 @@ curl http://127.0.0.1:8080/healthz
 ```bash
 cd desktop && python tests/test_input_normalization.py && python tests/test_input_review.py \
   && python tests/test_supplement.py && python tests/test_supplement_ui.py \
-  && python tests/test_router_client.py && QT_QPA_PLATFORM=offscreen python tests/smoke.py
+  && python tests/test_router_client.py && python tests/test_router_engine.py \
+  && QT_QPA_PLATFORM=offscreen python tests/smoke.py
 cd ../router && python -m unittest discover -s tests -v
 ```
 

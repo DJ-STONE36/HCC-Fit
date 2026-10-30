@@ -33,7 +33,7 @@ def main():
         f.answer_status = "answered"
     session.confirm()
     win._apply_input_session(session)
-    win.mode.setCurrentIndex(0)
+    win.select_mode("stub")
     win.show()
     QTest.qWait(200)
 

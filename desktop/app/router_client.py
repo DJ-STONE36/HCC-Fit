@@ -163,24 +163,49 @@ class RouterClient:
         return self._post(payload)
 
 
+# ---------------- 运行方式 ----------------
+
+ENGINES = [
+    ("内置引擎（无需启动服务）", "builtin"),
+    ("外部 Router 服务（HTTP）", "http"),
+]
+
+
 class RouterWorker(QObject):
+    """后台检索：内置引擎（进程内）或外部 HTTP 服务，二选一。"""
+
     done = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, base_url: str, token: str, scenario: dict,
-                 strategy: str, k: int, sciencepal_key: str = ""):
+    def __init__(self, scenario: dict, strategy: str = "fast", k: int = 8,
+                 sciencepal_key: str = "", engine: str = "builtin",
+                 base_url: str = "", token: str = "",
+                 filter_agent_id: str = "", sp_base: str = ""):
         super().__init__()
-        self.base_url = base_url
-        self.token = token
         self.scenario = scenario
         self.strategy = strategy
         self.k = k
         self.sciencepal_key = sciencepal_key
+        self.engine = engine or "builtin"
+        self.base_url = base_url
+        self.token = token
+        self.filter_agent_id = filter_agent_id
+        self.sp_base = sp_base
 
     def run(self):
         try:
-            self.done.emit(RouterClient(self.base_url, self.token,
-                                        sciencepal_key=self.sciencepal_key)
-                           .search(self.scenario, self.strategy, self.k))
+            if self.engine == "builtin":
+                from app.router_engine import search as engine_search
+                data = engine_search(
+                    self.scenario, strategy=self.strategy, k=self.k,
+                    sciencepal_key=self.sciencepal_key,
+                    filter_agent_id=self.filter_agent_id,
+                    base_url=self.sp_base,
+                )
+            else:
+                data = RouterClient(self.base_url, self.token,
+                                    sciencepal_key=self.sciencepal_key)
+                data = data.search(self.scenario, self.strategy, self.k)
+            self.done.emit(data)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))

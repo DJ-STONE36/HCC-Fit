@@ -25,11 +25,8 @@ from app.input_normalization import RuleExtractor
 from app.workers import ProbeWorker, RunWorker
 
 MODES = [
-    ("演示（不联网）", "stub"),
     ("SciencePal Agent（五阶段）", "sciencepal"),
     ("SciencePal · HCC-Fit 单次报告", "sciencepal_hcc"),
-    ("SciencePal（本地模拟）", "mock_sp"),
-    ("人工中转", "manual"),
 ]
 TIMEPOINTS = [
     ("术前（切除/消融前）", "pre_surgery"),
@@ -227,7 +224,8 @@ class MainWindow(QMainWindow):
         fh.addWidget(self.file_info, 1)
         fv.addLayout(fh)
         rh = QHBoxLayout()
-        self.router_btn = QPushButton("先找候选论文（PubMed）")
+        self.router_btn = QPushButton("找候选论文（内置 PubMed）")
+        self.router_btn.setToolTip("内置 Router 引擎，一键检索；不需要单独启动服务")
         self.router_btn.clicked.connect(self.open_router_dialog)
         rh.addWidget(self.router_btn)
         rh.addStretch(1)
@@ -259,14 +257,6 @@ class MainWindow(QMainWindow):
         ph.addWidget(self.probe_btn)
         ph.addWidget(self.probe_msg, 1)
         bv.addLayout(ph)
-
-        self.manual_hint = QLabel("人工模式：点开始后会在工作区生成 manual/*.prompt.md；"
-                                  "打开工作区，把 JSON 放到 manual/<stage>.json，再点开始。")
-        self.manual_hint.setWordWrap(True)
-        self.manual_hint.setStyleSheet("color:#8a5a00;background:#fff5e0;border:1px solid #f0dcb0;"
-                                       "border-radius:6px;padding:6px;")
-        self.manual_hint.setVisible(False)
-        bv.addWidget(self.manual_hint)
 
         self.start_btn = QPushButton("开始就诊流程")
         self.start_btn.setMinimumHeight(40)
@@ -430,14 +420,25 @@ class MainWindow(QMainWindow):
 
     # ---------------- 模式 ----------------
     def current_mode(self):
-        return self.mode.currentData() or "stub"
+        return self.mode.currentData() or "sciencepal"
+
+    def select_mode(self, mode: str) -> bool:
+        """按 mode id 选大脑。
+
+        界面只提供 sciencepal / sciencepal_hcc；其它 id（如自动化测试用的 stub）
+        runner 仍支持，但不在下拉框里展示，这里按需临时加入。
+        """
+        idx = self.mode.findData(mode)
+        if idx < 0:
+            self.mode.addItem(mode, mode)
+            idx = self.mode.count() - 1
+        self.mode.setCurrentIndex(idx)
+        return True
 
     def _on_mode_changed(self):
         if not hasattr(self, "stage_list") or not hasattr(self, "key"):
             return
         mode = self.current_mode()
-        if hasattr(self, "manual_hint"):
-            self.manual_hint.setVisible(mode == "manual")
         sp = mode in ("sciencepal", "sciencepal_hcc")
         for w in (self.key, self.base, self.agent, self.probe_btn):
             w.setEnabled(sp)
@@ -447,14 +448,11 @@ class MainWindow(QMainWindow):
         elif mode == "sciencepal":
             self.badge.setText("SciencePal Agent")
             self.badge.setStyleSheet("background:#12352a;color:#9fe3c4;padding:3px 10px;border-radius:10px;")
-        elif mode == "mock_sp":
-            self.badge.setText("SciencePal 本地模拟")
-            self.badge.setStyleSheet("background:#12352a;color:#9fe3c4;padding:3px 10px;border-radius:10px;")
-        elif mode == "manual":
-            self.badge.setText("人工中转")
-        else:
-            self.badge.setText("演示模式")
+        elif mode == "stub":
+            self.badge.setText("离线自检（仅自动化测试）")
             self.badge.setStyleSheet("background:#3a2f12;color:#f5d38a;padding:3px 10px;border-radius:10px;")
+        else:
+            self.badge.setText(mode)
         self._rebuild_stages()
 
     def _rebuild_stages(self):
@@ -943,11 +941,9 @@ class MainWindow(QMainWindow):
 
         mode = v.get("mode")
         self.badge.setText({
-            "stub": "演示模式（非真实结论）",
+            "stub": "离线自检（非真实结论）",
             "sciencepal": "SciencePal Agent",
             "sciencepal_hcc": "SciencePal · HCC-Fit 报告",
-            "mock_sp": "SciencePal 本地模拟",
-            "manual": "人工中转",
         }.get(mode, mode or ""))
         self._render_supplement(v)
 
@@ -1091,7 +1087,7 @@ class MainWindow(QMainWindow):
     # ---------------- 设置 ----------------
     def _load_settings(self):
         s = QSettings("HCC-Fit", "Desktop")
-        mode = s.value("mode", "stub")
+        mode = s.value("mode", "sciencepal")
         idx = self.mode.findData(mode)
         if idx >= 0:
             self.mode.setCurrentIndex(idx)
