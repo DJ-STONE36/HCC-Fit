@@ -5,6 +5,11 @@
 
 ## 运行
 
+**已构建好的 exe（推荐，不用 Python）**：双击 `desktop_build/HCC-Fit/HCC-Fit.exe`，
+或双击包根目录的 `启动 HCC-Fit.bat`。整个 `HCC-Fit` 文件夹一起复制/移动，exe 不能单独拿走。
+
+从源码运行：
+
 ```bash
 pip install PySide6 requests
 python main.py

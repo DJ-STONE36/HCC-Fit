@@ -82,13 +82,26 @@ HCC-Fit/
 
 ## 3. 启动与验证
 
+### 3.0 最快打开方式（不用 Python）
+
+双击包根目录的 **`启动 HCC-Fit.bat`**，或直接双击：
+
+```text
+desktop_build/HCC-Fit/HCC-Fit.exe
+```
+
+> one-dir 必须整个 `HCC-Fit` 文件夹一起复制/移动，exe 不能单独拿走。
+> 可以把这个 exe 发送快捷方式到桌面；`启动 HCC-Fit.bat` 只是替你定位到它。
+
 ### 3.1 桌面版源码
 
 ```bash
 cd desktop
-python -m pip install PySide6
+python -m pip install PySide6 requests
 python main.py
 ```
+
+或双击 `desktop/run_desktop.bat`。
 
 Windows 构建：
 
@@ -96,14 +109,6 @@ Windows 构建：
 cd desktop
 build_win.bat
 ```
-
-或直接运行：
-
-```text
-desktop_build/HCC-Fit/HCC-Fit.exe
-```
-
-> one-dir 必须整个 `HCC-Fit` 文件夹一起复制，exe 不能单独拿走。
 
 ### 3.2 桌面版测试
 
