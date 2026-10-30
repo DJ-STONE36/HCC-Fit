@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 
 import requests
@@ -250,6 +251,50 @@ def run_agent(agent_id: str, prompt: str, timeout_s: int = 120,
     }
 
 
+def _discover_filter_agent(api_key: str | None = None) -> tuple[str, str]:
+    """未配置 filter agent 时的兜底：从账号可用 Agent 里挑一个。
+
+    只在“能唯一确定”时才自动选，避免拿错 Agent：
+    - 名称含 filter/筛/审核/监督/screen/hcc 的恰好 1 个 → 用它；
+    - 可用 Agent 总共只有 1 个 → 用它；
+    - 其它情况（0 个或多个且无匹配）→ 返回空，交给上层明确降级。
+    返回 (agent_id, agent_name)。
+    """
+    headers = _headers(api_key)
+    items: list = []
+    for path in ("/agent-catalog?usable_only=true", "/agents"):
+        try:
+            resp = requests.get(_base() + path, headers=headers, timeout=15)
+        except requests.RequestException:
+            continue
+        if resp.status_code >= 400:
+            continue
+        try:
+            body = resp.json()
+        except ValueError:
+            continue
+        items = body.get("agents") or body.get("items") or body.get("data") or []
+        if items:
+            break
+
+    cands = []
+    for a in items if isinstance(items, list) else []:
+        if not isinstance(a, dict):
+            continue
+        aid = str(a.get("agent_id") or a.get("id") or "").strip()
+        if aid:
+            cands.append((aid, str(a.get("name") or ""), str(a.get("source") or "")))
+    if not cands:
+        return "", ""
+    pat = re.compile(r"filter|筛|审核|监督|screen|hcc", re.I)
+    matched = [c for c in cands if pat.search(c[1])]
+    if len(matched) == 1:
+        return matched[0][0], matched[0][1]
+    if len(cands) == 1:
+        return cands[0][0], cands[0][1]
+    return "", ""
+
+
 def filter_papers(scenario: dict, papers: list[dict], timeout_s: int = 90,
                   api_key: str | None = None) -> dict:
     cand = [{"pmid": p.get("pmid"), "title": p.get("title"), "year": p.get("year"),
@@ -263,13 +308,18 @@ def filter_papers(scenario: dict, papers: list[dict], timeout_s: int = 90,
         "只输出严格 JSON："
         '{"keep":[{"pmid":"","fit":0,"reason":""}],"drop":[{"pmid":"","reason":""}]}'
     )
-    agent_id = config.SCIENCEPAL_FILTER_AGENT_ID
+    agent_id = (config.SCIENCEPAL_FILTER_AGENT_ID or "").strip()
+    auto_name = ""
+    if not agent_id:
+        agent_id, auto_name = _discover_filter_agent(api_key)
     if not agent_id:
         raise SciencePalError(
-            "SCIENCEPAL_FILTER_AGENT_ID not configured; balanced cannot run SciencePal filter")
+            "未配置 SCIENCEPAL_FILTER_AGENT_ID，且无法自动确定可用的 filter Agent"
+            "（可用 Agent 为 0 个，或多个但名称无法区分）。"
+            "请在环境变量里显式指定一个 filter agent 的 UUID。")
     res = run_agent(agent_id, prompt, timeout_s=timeout_s, api_key=api_key)
     parsed = _parse(res.get("answer", ""))
-    return {**res, "parsed": parsed}
+    return {**res, "parsed": parsed, "auto_agent": auto_name}
 
 
 def _parse(text: str):

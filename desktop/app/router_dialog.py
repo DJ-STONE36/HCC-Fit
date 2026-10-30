@@ -117,7 +117,7 @@ class RouterDialog(QDialog):
         key_text = {"ok": "已配置", "warn": "疑似不完整", "error": "未配置/格式异常"}[level]
         if os.environ.get("SCIENCEPAL_API_KEY") and level == "error":
             key_text = "已由环境变量配置"
-        filter_text = "已配置" if st.get("filter_configured") else "未配置（balanced 会降级为 fast）"
+        filter_text = "已配置" if st.get("filter_configured") else "未配置（将自动选可用 Agent，失败则降级 fast）"
         self.engine_msg.setText(
             "内置引擎可用 · 策略 %s · SciencePal Key %s · filter agent %s"
             % ("/".join(st.get("strategies") or []), key_text, filter_text))

@@ -108,7 +108,7 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
 - 选 `fast`（5–10 秒）或 `balanced`（60–90 秒），选 k（1–8），点 **“一键检索候选”**；
 - **SciencePal Key 只有一处**：左侧最上方 **“1 · 大脑 / SciencePal 连接”**；弹窗从那里取，不再重复输入；
   空/非 ASCII/含空格会实时红字警告，`start_run` 与 balanced 检索也会拦住并提示；
-- **filter agent ID 不再在界面填写**：只认环境变量 `SCIENCEPAL_FILTER_AGENT_ID`（未配置时 balanced 会降级为 fast，并在状态行与警告区说明）；
+- **filter agent ID 不再在界面填写**：优先用环境变量 `SCIENCEPAL_FILTER_AGENT_ID`；未配置时会尝试自动选择一个可用 Agent（名称含 filter/筛/审核/HCC，或账号只有一个可用 Agent），仍无法唯一确定才降级为 fast，并在状态行/警告区说明；
 - 勾选候选后保存为 `router_candidates_*.md` 并加入论文列表；
 - **这只是题录/摘要，不是全文**；S2 四维核查仍需 PDF 或正文；
 - 该步骤是**可选前置**，不替换 S1，五阶段 Agent 逻辑不变。

@@ -169,8 +169,10 @@ class AgentClientTests(unittest.TestCase):
 
     def test_filter_requires_agent_id(self):
         config.SCIENCEPAL_FILTER_AGENT_ID = ""
-        with self.assertRaises(sciencepal.SciencePalError) as ctx:
-            sciencepal.filter_papers({"text": "HCC"}, [{"pmid": "1"}])
+        with mock.patch.object(sciencepal.requests, "get",
+                               lambda *a, **k: FakeResp(200, {"agents": []})):
+            with self.assertRaises(sciencepal.SciencePalError) as ctx:
+                sciencepal.filter_papers({"text": "HCC"}, [{"pmid": "1"}])
         self.assertIn("SCIENCEPAL_FILTER_AGENT_ID", str(ctx.exception))
 
     def test_base_url_normalized(self):
@@ -191,6 +193,78 @@ class AgentClientTests(unittest.TestCase):
             except sciencepal.SciencePalError:
                 pass
         self.assertEqual(seen[0], "https://example.test/api/agent/initiate")
+
+
+    # ---- 未配置 filter agent 时的自动兜底 ----
+    def _discovery_get(self, agents):
+        def fake_get(url, **kw):
+            if "agent-catalog" in url or url.rstrip("/").endswith("/agents"):
+                return FakeResp(200, {"agents": agents})
+            if url.endswith("/stream"):
+                return FakeResp(200, lines=sse({"type": "assistant",
+                                                "content": '{"keep":[]}'}))
+            return FakeResp(200, {"status": "completed"})
+        return fake_get
+
+    def test_auto_agent_single_usable(self):
+        config.SCIENCEPAL_FILTER_AGENT_ID = ""
+        posts = []
+
+        def fake_post(url, **kw):
+            posts.append(kw["data"])
+            return FakeResp(200, {"agent_run_id": "r1"})
+
+        with mock.patch.object(sciencepal.requests, "post", fake_post),                 mock.patch.object(sciencepal.requests, "get",
+                                  self._discovery_get([{"agent_id": "a1",
+                                                        "name": "HCC filter"}])):
+            out = sciencepal.filter_papers({"text": "HCC"}, [{"pmid": "1"}])
+        self.assertEqual(posts[0]["agent_id"], "a1")
+        self.assertEqual(out["auto_agent"], "HCC filter")
+
+    def test_auto_agent_prefers_name_match(self):
+        config.SCIENCEPAL_FILTER_AGENT_ID = ""
+        posts = []
+
+        def fake_post(url, **kw):
+            posts.append(kw["data"])
+            return FakeResp(200, {"agent_run_id": "r1"})
+
+        agents = [{"agent_id": "a1", "name": "Writer"},
+                  {"agent_id": "a2", "name": "HCC 文献筛选器"},
+                  {"agent_id": "a3", "name": "Coder"}]
+        with mock.patch.object(sciencepal.requests, "post", fake_post),                 mock.patch.object(sciencepal.requests, "get",
+                                  self._discovery_get(agents)):
+            sciencepal.filter_papers({"text": "HCC"}, [{"pmid": "1"}])
+        self.assertEqual(posts[0]["agent_id"], "a2")
+
+    def test_auto_agent_ambiguous_degrades(self):
+        config.SCIENCEPAL_FILTER_AGENT_ID = ""
+        agents = [{"agent_id": "a1", "name": "Writer"},
+                  {"agent_id": "a2", "name": "Coder"}]
+        with mock.patch.object(sciencepal.requests, "get",
+                               self._discovery_get(agents)):
+            with self.assertRaises(sciencepal.SciencePalError) as ctx:
+                sciencepal.filter_papers({"text": "HCC"}, [{"pmid": "1"}])
+        self.assertIn("无法自动确定", str(ctx.exception))
+
+    def test_env_agent_skips_discovery(self):
+        config.SCIENCEPAL_FILTER_AGENT_ID = "env-agent"
+        posts = []
+
+        def fake_post(url, **kw):
+            posts.append(kw["data"])
+            return FakeResp(200, {"agent_run_id": "r1"})
+
+        def fake_get(url, **kw):
+            assert "agent-catalog" not in url, "配置了 env 就不该再发现 Agent"
+            if url.endswith("/stream"):
+                return FakeResp(200, lines=sse({"type": "assistant",
+                                                "content": '{"keep":[]}'}))
+            return FakeResp(200, {"status": "completed"})
+
+        with mock.patch.object(sciencepal.requests, "post", fake_post),                 mock.patch.object(sciencepal.requests, "get", fake_get):
+            sciencepal.filter_papers({"text": "HCC"}, [{"pmid": "1"}])
+        self.assertEqual(posts[0]["agent_id"], "env-agent")
 
 
 if __name__ == "__main__":

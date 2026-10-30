@@ -181,6 +181,18 @@ fit 0-2；不匹配 drop；冲突保留 fit=1 标注；不要因标题有 nomogr
    再按 `fit` 取前 k；
 3. 解析失败 / 超时 / 429 / asked → `degraded=true` + warning + 回退算法 top-k（**不会**补造论文）。
 
+**只填 Key、不配 filter agent 时会怎样？**
+
+| 情况 | 行为 |
+|---|---|
+| 账号可用 Agent 恰好 1 个 | 自动用它，warnings 提示“已自动使用可用 Agent：<name>”，`degraded=false`（前提是模型返回可解析 JSON） |
+| 多个可用 Agent，其中恰好 1 个名称含 `filter/筛/审核/监督/screen/hcc` | 自动选它，并给出 warning |
+| 多个且无法区分，或 0 个可用 | 不猜：`degraded=true` + warning，回退算法 top-k（**balanced 的 Agent 筛选不生效**），并提示显式配置 `SCIENCEPAL_FILTER_AGENT_ID` |
+| 显式配置了 `SCIENCEPAL_FILTER_AGENT_ID` | 直接用它，不做自动发现 |
+
+> 所以“只填 Key”**可能**真正跑通 balanced，但取决于账号里可用 Agent 的数量/命名；
+> 想要稳定、可审计，仍建议显式配置一个专用 filter agent。
+
 > 也就是说：**改“召回”不用碰提示词（改 `core.py` 的查询模板）；改“哪些论文算数”才动这条提示词**
 > （或换一个 filter agent / 平台侧 Agent 配置）。
 

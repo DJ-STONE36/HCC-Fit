@@ -65,6 +65,10 @@ def run(scenario: dict, strategy: str = "auto", k: int = 5,
                             - int(time.perf_counter() - t0))
             filtered = filter_papers(scenario, candidates,
                                      timeout_s=min(90, remaining), api_key=api_key)
+            if filtered.get("auto_agent"):
+                warnings.append(
+                    "filter agent 未显式配置，已自动使用可用 Agent：%s"
+                    % filtered["auto_agent"])
             parsed = filtered.get("parsed") or {}
             kept = _pick(candidates, parsed.get("keep") or [], k)
             meta["llm_ms"] = filtered.get("latency_ms")
