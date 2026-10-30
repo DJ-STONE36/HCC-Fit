@@ -23,8 +23,7 @@ def main():
     win = MainWindow()
     win.key.setText("sp_live_demo_abcdefghijklmnop")   # 只用于截图，不落盘
     win.scene_input.setPlainText(
-        "58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，想看看三年生存率；"
-        "如果做模型核查，请说明是否 HCC、切除是否根治。")
+        "58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，从今天开始，想看看三年总生存率；如果做模型核查，请说明是否 HCC、切除是否根治。")
     win.resize(1420, 900)
     win.show()
     app.processEvents()

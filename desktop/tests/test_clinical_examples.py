@@ -90,12 +90,28 @@ def case_5():
     return "HCC/术后1月/OS 足够 → 只问预测范围"
 
 
+
+def case_6_official_example():
+    text = ("58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，从今天开始，"
+            "想看看三年总生存率；如果做模型核查，请说明是否 HCC、切除是否根治。")
+    s = RULES.extract(text)
+    # “请说明是否 HCC”是待确认表述，不能直接归一为 HCC
+    assert s.fields["disease"].status == "ambiguous", s.fields["disease"]
+    assert s.fields["start_point"].normalized == "今天"
+    assert s.fields["horizon"].normalized == "36个月"
+    assert field_sufficient(s, "outcome") is True          # “总生存率”=明确 OS
+    assert {q.id for q in s.followups} == {"q_disease"}
+    assert "总生存" in s.fields["intent"].normalized
+    return "官方示例：是否 HCC 不被当成诊断；只问疾病"
+
+
 def main():
     check("例1 术后2年看复发", case_1)
     check("例2 刚开完刀+1月复查", case_2)
     check("例3 大小/癌栓/两个问题", case_3)
     check("例4 BCLC B 期", case_4)
     check("例5 总生存期", case_5)
+    check("官方示例（是否 HCC）", case_6_official_example)
     ok = sum(1 for r in RESULTS if r)
     print("\n%d/%d 通过" % (ok, len(RESULTS)))
     return 0 if ok == len(RESULTS) else 1

@@ -162,8 +162,7 @@ class MainWindow(QMainWindow):
         sv.addWidget(QLabel("请描述患者情况和你想回答的问题（一段话即可）"))
         ex_row = QHBoxLayout()
         self.scene_example = QLabel(
-            "示例：58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，想看看三年生存率；"
-            "如果做模型核查，请说明是否 HCC、切除是否根治。")
+            "示例：58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，从今天开始，想看看三年总生存率；如果做模型核查，请说明是否 HCC、切除是否根治。")
         self.scene_example.setWordWrap(True)
         self.scene_example.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.scene_example.setStyleSheet("color:#66727f;font-size:9pt;")
@@ -519,8 +518,7 @@ class MainWindow(QMainWindow):
     # ---------------- 单输入场景卡 ----------------
     def _fill_scene_example(self):
         self.scene_input.setPlainText(
-            "58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，想看看三年生存率；"
-            "如果做模型核查，请说明是否 HCC、切除是否根治。")
+            "58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，从今天开始，想看看三年总生存率；如果做模型核查，请说明是否 HCC、切除是否根治。")
 
     def _on_scene_text_changed(self):
         if self._setting_scene:

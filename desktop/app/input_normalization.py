@@ -54,6 +54,7 @@ STATUS_LABEL = {
 
 HISTORY_CUES = ("既往", "曾", "以前", "病史", "多年前", "之前")
 SUSPECT_CUES = ("疑似", "考虑", "待排", "可能", "不除外", "疑为", "高度怀疑")
+QUESTION_CUES = ("是否", "是不是", "有无", "请确认", "需确认", "是否明确")
 NEG_CUES = ("非", "不是", "排除", "未见", "否认", "无", "未发现")
 
 _CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
@@ -440,6 +441,8 @@ class RuleExtractor:
                 return "historical"
             if _has(SUSPECT_CUES, prefix):
                 return "suspected"
+            if re.search(r"(?:%s)\s*$" % "|".join(QUESTION_CUES), prefix):
+                return "ambiguous"          # “请说明是否 HCC”不是诊断
             if _negated_prefix(prefix):
                 return "negated"
         return term.auto_status
@@ -526,6 +529,9 @@ class RuleExtractor:
                 f.flags.append("历史诊断不等于本次")
             elif status == "negated":
                 self._set(f, c, "negated", normalized="HCC 被否定")
+            elif status == "ambiguous":
+                self._set(f, c, "ambiguous", normalized="HCC（待确认）")
+                f.flags.append("原话是“是否 HCC”这类待确认表述")
             else:
                 self._set(f, c, "normalized", normalized="HCC")
             # 同时出现“肝癌”上位词：保留提示，不改变 HCC 结论

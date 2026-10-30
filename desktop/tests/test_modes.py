@@ -63,6 +63,10 @@ def case_stub_still_works_for_tests():
     assert any("SciencePal 连接" in t for t in titles), titles
     assert not any("大脑" in t for t in titles), titles
     assert hasattr(win, "split_papers"), "缺少逐篇发送复选框"
+    assert "从今天开始" in win.scene_example.text(), win.scene_example.text()
+    assert "总生存率" in win.scene_example.text(), win.scene_example.text()
+    win._fill_scene_example()
+    assert "从今天开始" in win.scene_input.toPlainText()
     assert win.mode.count() == 2, win.mode.count()
     win.select_mode("stub")           # 仅自动化：临时加入下拉框
     assert win.current_mode() == "stub"
