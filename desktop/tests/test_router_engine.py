@@ -267,16 +267,41 @@ def case_browser_exit_detected():
     from app import links
     called = {"start": False}
     orig_launch, orig_start = links._launch_default_browser, os.startfile
+    orig_count, orig_wait = links._browser_window_count, links._wait_browser_window
+    orig_explorer = links._launch_explorer
     links._launch_default_browser = lambda u: (False, links.EXIT_PREFIX + "（exit=21）")
+    links._launch_explorer = lambda u: (False, "explorer: test")
+    links._browser_window_count = lambda: 0
+    links._wait_browser_window = lambda before, timeout=3.0: False
     os.startfile = lambda u: called.__setitem__("start", True)
     try:
         ok, how = links.open_external_url("https://example.test/x")
     finally:
         links._launch_default_browser = orig_launch
+        links._launch_explorer = orig_explorer
+        links._browser_window_count = orig_count
+        links._wait_browser_window = orig_wait
         os.startfile = orig_start
     assert not ok and "exit=21" in how, (ok, how)
-    assert called["start"] is False, "秒退后不应再用 startfile 假成功"
-    return "浏览器秒退时明确报错，不再假成功"
+    assert called["start"] is True, "应先尝试 startfile"
+    return "startfile 没拉起窗口 + 浏览器秒退 → 明确报错"
+
+
+def case_startfile_verified():
+    import os
+    from app import links
+    orig_start, orig_count, orig_wait = os.startfile, links._browser_window_count, links._wait_browser_window
+    links._browser_window_count = lambda: 0
+    links._wait_browser_window = lambda before, timeout=3.0: True
+    os.startfile = lambda u: None
+    try:
+        ok, how = links.open_external_url("https://example.test/x")
+    finally:
+        os.startfile = orig_start
+        links._browser_window_count = orig_count
+        links._wait_browser_window = orig_wait
+    assert ok and how == "startfile", (ok, how)
+    return "ShellExecute 后检测到浏览器窗口 → 成功"
 
 
 def case_open_external_fallback():
@@ -285,8 +310,12 @@ def case_open_external_fallback():
     from PySide6.QtGui import QDesktopServices
     from app import links
     orig_launch = links._launch_default_browser
+    orig_count = links._browser_window_count
+    orig_explorer = links._launch_explorer
     orig_start, orig_qt, orig_wb = os.startfile, QDesktopServices.openUrl, webbrowser.open
     links._launch_default_browser = lambda _u: (False, "no browser")
+    links._launch_explorer = lambda _u: (False, "explorer: test")
+    links._browser_window_count = lambda: 1      # 已有浏览器窗口 → 跳过 startfile 验证
     os.startfile = lambda _u: (_ for _ in ()).throw(OSError("blocked"))
     QDesktopServices.openUrl = staticmethod(lambda _u: False)
     webbrowser.open = lambda _u: True
@@ -294,6 +323,8 @@ def case_open_external_fallback():
         ok, how = links.open_external_url("https://example.test/x")
     finally:
         links._launch_default_browser = orig_launch
+        links._launch_explorer = orig_explorer
+        links._browser_window_count = orig_count
         os.startfile = orig_start
         QDesktopServices.openUrl = orig_qt
         webbrowser.open = orig_wb
@@ -366,6 +397,7 @@ def main():
     check("复制 DOI（多选）", case_copy_doi_multi)
     check("打开链接多级兜底", case_open_external_fallback)
     check("浏览器秒退检测", case_browser_exit_detected)
+    check("startfile 窗口验证", case_startfile_verified)
     check("默认浏览器命令行", case_build_cmdline)
     check("标题换行完整显示", case_titles_wrap)
     check("保存候选", case_save_candidates)

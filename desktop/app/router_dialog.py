@@ -332,11 +332,12 @@ class RouterDialog(QDialog):
                 % (len(ok_urls), "多篇" if len(ok_urls) > 1 else "单篇"))
             return
         fail_text = chr(10).join(u for u, _ in failed)
+        reason = failed[0][1] if failed else ""
         QApplication.clipboard().setText(fail_text)
         QMessageBox.information(
             self, "部分链接未能自动打开",
-            "成功 %d 个，失败 %d 个。%s失败链接已复制到剪贴板，可粘贴到浏览器：%s%s"
-            % (len(ok_urls), len(failed), chr(10), chr(10), fail_text))
+            "成功 %d 个，失败 %d 个。%s失败原因：%s%s失败链接已复制到剪贴板，可粘贴到浏览器：%s%s"
+            % (len(ok_urls), len(failed), chr(10), reason, chr(10), chr(10), fail_text))
 
     def copy_url(self):
         targets = self._target_papers()
