@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""数据目录：不可写时必须自动回退（解决 AppData\LocalLow 权限拒绝）。"""
+r"""数据目录：不可写时必须自动回退（解决 AppData\LocalLow 权限拒绝）。"""
 import os
 import sys
 from pathlib import Path

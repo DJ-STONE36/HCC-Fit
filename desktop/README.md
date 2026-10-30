@@ -86,8 +86,8 @@ python main.py
 
 ```bash
 python tools/input_demo.py "肝癌患者，刚切完，病理还没出来，想看看三年生存。"
-python tests/test_input_normalization.py   # 15/15
-python tests/test_clinical_examples.py     # 5/5：用户给的 5 个口述例子
+python tests/test_input_normalization.py   # 16/16
+python tests/test_clinical_examples.py     # 6/6：5 个口述例子 + 官方示例
 python tests/test_input_review.py          # 场景卡 UI 冒烟（含零追问场景）
 ```
 
@@ -149,7 +149,7 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
 测试：
 
 ```bash
-python tests/test_router_engine.py   # 内置引擎 + 候选对话框（打开链接/标题换行/保存）10 项
+python tests/test_router_engine.py   # 内置引擎 + 候选对话框（复制/标题换行/保存）18 项
 python tests/test_paths.py           # 数据目录可写性/回退 2 项
 python tests/test_router_client.py   # Router 场景映射
 ```
@@ -168,7 +168,7 @@ python tests/test_router_client.py   # Router 场景映射
 
 ```bash
 python tests/smoke.py                    # 主窗口：确认场景卡 → stub → 导出 JSON/PDF → schema
-python tests/test_input_normalization.py # 规则/冲突/追问抑制/空格切分/schema 15 项
+python tests/test_input_normalization.py # 规则/冲突/追问抑制/空格切分/schema 16 项
 python tests/test_clinical_examples.py   # 5 个临床口述例子（术后时长/癌栓/BCLC/意图）
 python tests/test_input_review.py        # 场景卡对话框（含“零追问”场景）
 python tests/test_supplement.py          # 补充资料拼接/落盘
