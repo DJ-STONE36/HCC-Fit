@@ -365,6 +365,7 @@ curl http://127.0.0.1:8080/healthz
 | **可读性中文化 + 免费全文过滤** | 表格“可读性”改为“免费全文（PMC）/仅摘要（全文可能收费）/仅题录（无摘要）”并带 tooltip/配色；新增“只看 PMC 免费全文”复选框，经 worker/engine 透传 require_fulltext，过滤时多取 3k 再截到 k；新增 2 项 Router 测试 + 对话框标签断言 |
 | **浏览器秒退检测** | 启动默认浏览器后等 1.2s 看退出码：0=已交给现有实例；非 0=被拦截，不再退到 startfile 假成功，而是提示“进程启动后立即退出（exit=N）”并复制链接；新增测试 1 项 |
 | **直接 exe 打开 + Edge 窗口判定** | 本机 `https` ShellExecute 静默失效，改为直接 `msedge.exe "URL"`（已有实例 exit 0 handoff）；窗口统计只认 msedge.exe（修复 WebView2 误判导致的“假成功”）；成功后还原/置前；新增 `--open-url` 诊断与 `logs/links.log` |
+| **取消“打开 PMC/PubMed”** | 按用户要求去掉打开按钮与 `open_fulltext`（多级打开代码保留在 links.py）；只留“复制 PMC/PubMed 链接”“复制 DOI”，双击行也复制；测试改为复制 4 项 |
 | **接入文档** | 新增 `docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`（官方 8 条规则、fast vs balanced、五阶段、错误码、本次修复） |
 | **测试** | Router 新增 `test_agent_client.py`（8 项，全离线）→ 19 项；桌面新增 `test_sciencepal_client.py`（4 项）→ 9 个脚本 |
 

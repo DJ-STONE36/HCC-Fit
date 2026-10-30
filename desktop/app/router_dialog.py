@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
 
 from app import paths
 from app.keycheck import check_key
-from app.links import open_external_url
 from app.router_client import RouterWorker
 
 
@@ -103,8 +102,7 @@ class RouterDialog(QDialog):
         self.table.setColumnWidth(4, 96)          # 可读性
         h.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(5, 240)         # 为什么/风险（比标题窄）
-        self.table.itemDoubleClicked.connect(
-            lambda _i: self.open_fulltext([self._paper_at(self.table.currentRow())]))
+        self.table.itemDoubleClicked.connect(lambda _i: self.copy_url())
         self.table.horizontalHeader().sectionResized.connect(self._schedule_fit)
         lay.addWidget(self.table, 1)
 
@@ -113,20 +111,15 @@ class RouterDialog(QDialog):
         lay.addWidget(self.warn)
 
         bar = QHBoxLayout()
-        self.full_btn = QPushButton("打开 PMC / PubMed")
-        self.full_btn.setToolTip("打开选中（或勾选）的论文；多选会同时打开多个网页")
-        # 注意：clicked 会带 checked(bool)；必须用 lambda 吞掉，否则会被当成 papers=False
-        self.full_btn.clicked.connect(lambda: self.open_fulltext())
         self.doi_btn = QPushButton("复制 DOI")
         self.doi_btn.setToolTip("复制选中（或勾选）论文的 DOI；多选时每行一个")
         self.doi_btn.clicked.connect(lambda: self.copy_doi())
-        self.url_btn = QPushButton("复制链接")
-        self.url_btn.setToolTip("浏览器没弹出来时，复制链接手动粘贴")
+        self.url_btn = QPushButton("复制 PMC/PubMed 链接")
+        self.url_btn.setToolTip("复制选中（或勾选）论文的链接；多选时每行一个，双击行也可复制")
         self.url_btn.clicked.connect(lambda: self.copy_url())
         self.add_btn = QPushButton("保存选中候选并加入论文列表")
         self.add_btn.setEnabled(False)
         self.add_btn.clicked.connect(self.save_candidates)
-        bar.addWidget(self.full_btn)
         bar.addWidget(self.doi_btn)
         bar.addWidget(self.url_btn)
         bar.addStretch(1)
@@ -299,45 +292,6 @@ class RouterDialog(QDialog):
         if not url and pmid:
             url = "https://pubmed.ncbi.nlm.nih.gov/%s/" % pmid
         return url
-
-    def open_fulltext(self, papers=None):
-        targets = papers if papers is not None else self._target_papers()
-        if not targets:
-            QMessageBox.information(self, "没有候选", "请先“一键检索候选”，再打开论文链接。")
-            return
-        urls = []
-        for p in targets:
-            u = self._paper_url(p)
-            if u and u not in urls:
-                urls.append(u)
-        if not urls:
-            QMessageBox.information(self, "没有链接", "选中的候选没有 PMID/链接，无法打开。")
-            return
-        if len(urls) > 3:
-            if QMessageBox.question(
-                    self, "打开多个链接",
-                    "选中了 %d 篇，将同时打开 %d 个网页。继续？" % (len(targets), len(urls))) \
-                    != QMessageBox.StandardButton.Yes:
-                return
-        ok_urls, failed = [], []
-        for u in urls:
-            ok, how = open_external_url(u)
-            if ok:
-                ok_urls.append(u)
-            else:
-                failed.append((u, how))
-        if not failed:
-            self.status.setText(
-                "已请求浏览器打开 %d 个链接（%s）　·　若没反应，点“复制链接”手动粘贴"
-                % (len(ok_urls), "多篇" if len(ok_urls) > 1 else "单篇"))
-            return
-        fail_text = chr(10).join(u for u, _ in failed)
-        reason = failed[0][1] if failed else ""
-        QApplication.clipboard().setText(fail_text)
-        QMessageBox.information(
-            self, "部分链接未能自动打开",
-            "成功 %d 个，失败 %d 个。%s失败原因：%s%s失败链接已复制到剪贴板，可粘贴到浏览器：%s%s"
-            % (len(ok_urls), len(failed), chr(10), reason, chr(10), chr(10), fail_text))
 
     def copy_url(self):
         targets = self._target_papers()

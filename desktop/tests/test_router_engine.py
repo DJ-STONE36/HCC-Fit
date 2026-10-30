@@ -174,58 +174,64 @@ def _dialog_with_papers():
     return dlg
 
 
-def _open_with(dlg):
-    from app import router_dialog as rd
-    opened = []
-    orig = rd.open_external_url
-    rd.open_external_url = lambda url: (opened.append(url) or (True, "test"))
-    try:
-        dlg.open_fulltext()
-    finally:
-        rd.open_external_url = orig
-    return opened
-
-
-def case_open_selected_row():
+def case_copy_url_selected():
+    from PySide6.QtWidgets import QApplication
     dlg = _dialog_with_papers()
     try:
         dlg.table.clearSelection()
         dlg.table.selectRow(1)                 # 选第二篇
-        opened = _open_with(dlg)
+        dlg.copy_url()
     finally:
         dlg.close()
-    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/222/"], opened
-    return "选哪篇开哪篇（第二篇）"
+    got = QApplication.clipboard().text()
+    assert got == "https://pubmed.ncbi.nlm.nih.gov/222/", got
+    return "选哪篇复制哪篇（第二篇）"
 
 
-def case_open_multi_selected():
-    from PySide6.QtWidgets import QTableWidgetSelectionRange
+def case_copy_url_multi():
+    from PySide6.QtWidgets import QApplication, QTableWidgetSelectionRange
     dlg = _dialog_with_papers()
     try:
         dlg.table.clearSelection()
         dlg.table.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 5), True)
-        opened = _open_with(dlg)
+        dlg.copy_url()
     finally:
         dlg.close()
-    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/111/",
-                      "https://pubmed.ncbi.nlm.nih.gov/222/"], opened
-    return "多选两篇同时打开"
+    got = QApplication.clipboard().text()
+    assert got == ("https://pubmed.ncbi.nlm.nih.gov/111/\n"
+                   "https://pubmed.ncbi.nlm.nih.gov/222/"), repr(got)
+    return "多选两篇链接一起复制（换行分隔）"
 
 
-def case_open_checked_fallback():
+def case_copy_url_checked():
     from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
     dlg = _dialog_with_papers()
     try:
         dlg.table.clearSelection()
         for row in range(dlg.table.rowCount()):     # 只勾第二篇
-            cell = dlg.table.item(row, 0)
-            cell.setCheckState(Qt.CheckState.Unchecked)
+            dlg.table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
         dlg.table.item(1, 0).setCheckState(Qt.CheckState.Checked)
-        opened = _open_with(dlg)
+        dlg.copy_url()
     finally:
         dlg.close()
-    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/222/"], opened
-    return "没选行时按勾选打开"
+    got = QApplication.clipboard().text()
+    assert got == "https://pubmed.ncbi.nlm.nih.gov/222/", got
+    return "没选行时按勾选复制"
+
+
+def case_copy_url_button():
+    from PySide6.QtWidgets import QApplication
+    dlg = _dialog_with_papers()
+    try:
+        dlg.table.clearSelection()
+        dlg.table.selectRow(1)
+        dlg.url_btn.click()                    # 走真实按钮信号
+    finally:
+        dlg.close()
+    got = QApplication.clipboard().text()
+    assert got == "https://pubmed.ncbi.nlm.nih.gov/222/", got
+    return "按钮点击复制选中行"
 
 
 def case_copy_doi_multi():
@@ -240,26 +246,6 @@ def case_copy_doi_multi():
     got = QApplication.clipboard().text()
     assert got == "10.1/x\n10.2/y", repr(got)
     return "复制 DOI 支持多选（换行分隔）"
-
-
-
-def case_button_click_opens_selected():
-    """回归：clicked 会带 checked=False，不能被当成 papers=False。"""
-    from app import router_dialog as rd
-    dlg = _dialog_with_papers()
-    opened = []
-    orig = rd.open_external_url
-    rd.open_external_url = lambda u: (opened.append(u) or (True, "test"))
-    try:
-        dlg.table.clearSelection()
-        dlg.table.selectRow(1)
-        dlg.full_btn.click()
-    finally:
-        rd.open_external_url = orig
-        dlg.close()
-    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/222/"], opened
-    return "真实按钮点击也能打开选中行"
-
 
 
 def case_browser_exit_detected():
@@ -422,10 +408,10 @@ def main():
     check("后台线程：内置引擎", case_worker_builtin)
     check("后台线程：外部 HTTP", case_worker_http)
     check("对话框只有内置引擎", case_dialog)
-    check("打开链接（选中行）", case_open_selected_row)
-    check("打开链接（按钮点击）", case_button_click_opens_selected)
-    check("打开链接（多选）", case_open_multi_selected)
-    check("打开链接（勾选兜底）", case_open_checked_fallback)
+    check("复制链接（选中行）", case_copy_url_selected)
+    check("复制链接（按钮点击）", case_copy_url_button)
+    check("复制链接（多选）", case_copy_url_multi)
+    check("复制链接（勾选兜底）", case_copy_url_checked)
     check("复制 DOI（多选）", case_copy_doi_multi)
     check("打开链接多级兜底", case_open_external_fallback)
     check("浏览器秒退检测", case_browser_exit_detected)
