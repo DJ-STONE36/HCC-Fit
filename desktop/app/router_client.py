@@ -194,7 +194,8 @@ class RouterWorker(QObject):
     def __init__(self, scenario: dict, strategy: str = "fast", k: int = 8,
                  sciencepal_key: str = "", engine: str = "builtin",
                  base_url: str = "", token: str = "",
-                 filter_agent_id: str = "", sp_base: str = ""):
+                 filter_agent_id: str = "", sp_base: str = "",
+                 require_fulltext: bool = False):
         super().__init__()
         self.scenario = scenario
         self.strategy = strategy
@@ -205,6 +206,7 @@ class RouterWorker(QObject):
         self.token = token
         self.filter_agent_id = filter_agent_id
         self.sp_base = sp_base
+        self.require_fulltext = bool(require_fulltext)
 
     def run(self):
         try:
@@ -215,6 +217,7 @@ class RouterWorker(QObject):
                     sciencepal_key=self.sciencepal_key,
                     filter_agent_id=self.filter_agent_id,
                     base_url=self.sp_base,
+                    require_fulltext=self.require_fulltext,
                 )
             else:
                 data = RouterClient(self.base_url, self.token,

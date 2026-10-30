@@ -126,6 +126,8 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
   如需换站/换 Agent：环境变量 `SCIENCEPAL_BASE_URL` / `SCIENCEPAL_AGENT_ID`（设空则回退按名称查找/自动路由）；
 - **filter agent 也已内置**（同一个 `HCC-Fit` Agent）；环境变量 `SCIENCEPAL_FILTER_AGENT_ID` 优先，
   显式设为空则退回“自动选择可用 Agent/降级 fast”；界面不再询问。
+- 可读性（中文）：**免费全文（PMC）** / **仅摘要（全文可能收费）** / **仅题录（无摘要）**；
+  勾选 **“只看 PMC 免费全文”** 会过滤掉仅摘要候选（会多取一些再筛，返回可能少于 k）；
 - 打开/复制：**选中哪篇就开哪篇**；多选（Ctrl/Shift 或勾选）会同时打开多个网页 / 复制多条链接；
   “复制 DOI”同理（多选每行一个）；没选行时按勾选处理，未勾选才退回第一篇；
 - 打开链接：优先读注册表里的**默认浏览器**直接启动（比 ShellExecute 可靠），失败再依次尝试

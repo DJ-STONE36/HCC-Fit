@@ -362,6 +362,7 @@ curl http://127.0.0.1:8080/healthz
 | **原始返回默认隐藏** | “就诊反馈”右上角新增“显示原始返回”，默认不占页签；降级/二次修复时自动显示；数据仍写入 visit.json 的 raw_answers（PDF 不含）；设置记忆；新增显隐测试 |
 | **打开链接更可靠** | 新增注册表读取默认浏览器（HKCU UrlAssociations → ProgId → 命令行），优先直接启动；模板兼容 `%1` 与 `"%1"`；候选表新增“复制链接”按钮；新增命令行构造测试 |
 | **按选中打开/复制** | 打开 PMC/PubMed 与复制 DOI 改为按“选中行 → 勾选 → 第一篇”取材；表格支持 ExtendedSelection，多选同时打开/复制（>3 个先确认）；新增 3 项测试 |
+| **可读性中文化 + 免费全文过滤** | 表格“可读性”改为“免费全文（PMC）/仅摘要（全文可能收费）/仅题录（无摘要）”并带 tooltip/配色；新增“只看 PMC 免费全文”复选框，经 worker/engine 透传 require_fulltext，过滤时多取 3k 再截到 k；新增 2 项 Router 测试 + 对话框标签断言 |
 | **接入文档** | 新增 `docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`（官方 8 条规则、fast vs balanced、五阶段、错误码、本次修复） |
 | **测试** | Router 新增 `test_agent_client.py`（8 项，全离线）→ 19 项；桌面新增 `test_sciencepal_client.py`（4 项）→ 9 个脚本 |
 

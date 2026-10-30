@@ -12,8 +12,10 @@ import os
 import time
 
 from PySide6.QtCore import Qt, QThread, QTimer
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QHBoxLayout,
+    QHeaderView, QLabel,
     QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
     QTextBrowser, QVBoxLayout,
 )
@@ -22,6 +24,13 @@ from app import paths
 from app.keycheck import check_key
 from app.links import open_external_url
 from app.router_client import RouterWorker
+
+
+READABILITY_ZH = {
+    "fulltext": ("免费全文（PMC）", "PMC 收录，可直接阅读/下载全文"),
+    "abstract_only": ("仅摘要（全文可能收费）", "PubMed 只提供摘要；全文通常需机构订阅或联系作者"),
+    "metadata_only": ("仅题录（无摘要）", "没有取到摘要；需要看原文才能判断"),
+}
 
 
 class RouterDialog(QDialog):
@@ -53,12 +62,15 @@ class RouterDialog(QDialog):
         self.k = QSpinBox()
         self.k.setRange(1, 8)
         self.k.setValue(8)
+        self.fulltext_only = QCheckBox("只看 PMC 免费全文")
+        self.fulltext_only.setToolTip("勾选后过滤掉“仅摘要/仅题录”的候选；会多取一些再筛，返回可能少于 k 篇。")
         self.search_btn = QPushButton("一键检索候选")
         self.search_btn.clicked.connect(self.search)
         row.addWidget(QLabel("策略"))
         row.addWidget(self.strategy)
         row.addWidget(QLabel("k"))
         row.addWidget(self.k)
+        row.addWidget(self.fulltext_only)
         row.addStretch(1)
         row.addWidget(self.search_btn)
         lay.addLayout(row)
@@ -70,7 +82,7 @@ class RouterDialog(QDialog):
         lay.addWidget(self.status)
 
         self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["选", "标题", "年", "期刊", "可读性", "为什么 / 风险"])
+        self.table.setHorizontalHeaderLabels(["选", "标题", "年", "期刊", "全文/摘要", "为什么 / 风险"])
         self.table.setWordWrap(True)
         self.table.setAlternatingRowColors(True)
         self.table.setTextElideMode(Qt.TextElideMode.ElideNone)   # 标题不省略
@@ -160,7 +172,7 @@ class RouterDialog(QDialog):
         self.thread = QThread(self)
         self.worker = RouterWorker(
             self.scenario, strategy, self.k.value(), self.sciencepal_key,
-            engine="builtin",
+            engine="builtin", require_fulltext=self.fulltext_only.isChecked(),
         )
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
@@ -195,7 +207,16 @@ class RouterDialog(QDialog):
             self.table.setItem(row, 2, QTableWidgetItem(str(p.get("year") or "")))
             self.table.setItem(row, 3, QTableWidgetItem(str(p.get("journal") or "")))
             rd = p.get("readability") or {}
-            self.table.setItem(row, 4, QTableWidgetItem(str(rd.get("level") or "")))
+            level = str(rd.get("level") or "")
+            label, tip = READABILITY_ZH.get(level, (level or "—", ""))
+            rcell = QTableWidgetItem(label)
+            if tip:
+                rcell.setToolTip(tip + chr(10) + str(rd.get("url") or ""))
+            if level == "fulltext":
+                rcell.setForeground(QBrush(QColor("#1e8449")))
+            elif level == "abstract_only":
+                rcell.setForeground(QBrush(QColor("#b9770e")))
+            self.table.setItem(row, 4, rcell)
             why = "；".join(p.get("why") or [])
             risk = "；".join(p.get("risk") or [])
             extra = "why: %s\nrisk: %s" % (why or "—", risk or "—")
@@ -208,8 +229,14 @@ class RouterDialog(QDialog):
         degraded = (data.get("meta") or {}).get("degraded")
         self.warn.setPlainText("\n".join(warnings) or ("已降级：SciencePal 不可用" if degraded else "无警告"))
         used = data.get("strategy_used") or ""
-        self.status.setText("返回 %d 篇，实际策略：%s；勾选后保存，再回论文区添加 PDF。"
-                            % (len(self.papers), used or "—"))
+        counts = (data.get("meta") or {}).get("readability") or {}
+        count_text = ""
+        if counts:
+            count_text = "（免费全文 %d / 仅摘要 %d / 仅题录 %d）" % (
+                counts.get("fulltext", 0), counts.get("abstract_only", 0),
+                counts.get("metadata_only", 0))
+        self.status.setText("返回 %d 篇%s，实际策略：%s；勾选后保存，再回论文区添加 PDF。"
+                            % (len(self.papers), count_text, used or "—"))
         self.add_btn.setEnabled(bool(self.papers))
         if not self.papers:
             self.status.setText("没有找到候选；可改用 fast、放宽条件，或直接在论文区添加 PDF。")

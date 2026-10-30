@@ -42,7 +42,8 @@ def run(scenario: dict, strategy: str = "auto", k: int = 5,
     rid = request_id or str(uuid.uuid4())
     used = route(scenario, strategy, deadline_ms, thinking, config.ENABLED_STRATEGIES)
     warnings = []
-    base = fast_search(scenario, k=k, require_fulltext=False)
+    fetch_k = max(k * 3, 12) if require_fulltext else k   # 过滤后还要够 k 篇
+    base = fast_search(scenario, k=fetch_k, require_fulltext=False)
     papers = list(base["papers"])
     pool = base.get("pool") or []
     meta = {
@@ -109,6 +110,7 @@ def run(scenario: dict, strategy: str = "auto", k: int = 5,
             warnings.append(
                 f"require_fulltext: dropped {before - len(papers)} "
                 "abstract-only candidates")
+        papers = papers[:k]                      # 过滤后仍按 k 截断
 
     meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
     meta["papers_returned"] = len(papers)

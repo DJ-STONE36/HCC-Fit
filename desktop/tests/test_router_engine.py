@@ -91,9 +91,9 @@ def case_worker_builtin():
     orig = router_engine.search
 
     def fake(scenario, strategy="fast", k=8, sciencepal_key="", filter_agent_id="",
-             base_url="", deadline_ms=None):
+             base_url="", deadline_ms=None, require_fulltext=False):
         calls.update(strategy=strategy, k=k, key=sciencepal_key,
-                     agent=filter_agent_id)
+                     agent=filter_agent_id, fulltext=require_fulltext)
         return {"papers": [{"pmid": "1"}], "strategy_used": strategy}
 
     router_engine.search = fake
@@ -107,7 +107,7 @@ def case_worker_builtin():
         router_engine.search = orig
     assert got and got[0]["papers"], got
     assert calls == {"strategy": "balanced", "k": 2, "key": "sp-k",
-                     "agent": "agent-9"}, calls
+                     "agent": "agent-9", "fulltext": False}, calls
     return "后台线程走内置引擎，参数不出错"
 
 

@@ -140,7 +140,8 @@ def _apply_runtime_config(sciencepal_key: str = "", filter_agent_id: str = "",
 
 def search(scenario: dict, strategy: str = "fast", k: int = 8,
            sciencepal_key: str = "", filter_agent_id: str = "",
-           base_url: str = "", deadline_ms: int | None = None) -> dict:
+           base_url: str = "", deadline_ms: int | None = None,
+           require_fulltext: bool = False) -> dict:
     """进程内检索：参数/返回与 HTTP `/v1/search` 一致（`scenario` 见 router 的 schema）。"""
     strategies = ensure_engine()
     from hccfit.scope import ScopeError  # noqa: PLC0415
@@ -151,7 +152,8 @@ def search(scenario: dict, strategy: str = "fast", k: int = 8,
     try:
         return strategies.run(
             dict(scenario or {}), strategy=strategy, k=max(1, min(8, int(k))),
-            deadline_ms=int(deadline_ms), thinking=False, require_fulltext=False,
+            deadline_ms=int(deadline_ms), thinking=False,
+            require_fulltext=bool(require_fulltext),
             api_key=(sciencepal_key.strip() or None),
         )
     except ScopeError as exc:
