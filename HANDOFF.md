@@ -2,6 +2,8 @@
 
 > 给新会话/接手人：先读本文件，再按“启动与验证”跑一遍。
 > 本包是**源码 + Windows 构建 + Router 服务 + 文档**的快照，不含真实 API Key、患者数据或测试工作区。
+>
+> **2026-10-30 接手更新（v2）**：交接单里的三项 P0 已完成——移除可选 AI 候选层、追问抑制（`sufficient`）、空格短句切分；测试 15/15、Router 11/11 全绿，Windows 构建已重建。详见第 5 节与第 9 节。
 
 ---
 
@@ -13,9 +15,9 @@
 |---|---|
 | 单输入场景卡（一段话 → 字段） | ✅ 可用 |
 | 规则抽取 + 术语表 | ✅ |
-| 可选 AI 候选 | ⚠️ **仍在代码/界面里，用户已要求去掉，尚未实施** |
-| 追问 / 确认门禁 / 版本 +1 | ✅ 基本可用；**“原话已有信息就不追问”尚未实施** |
-| 空格短句切分 | ❌ **尚未实施**（当前只按 `。！？；换行` 切） |
+| 可选 AI 候选 | ✅ **已按用户要求移除**（代码、界面、测试、构建配置） |
+| 追问 / 确认门禁 / 版本 +1 | ✅ **已实现“原话已有信息就不追问”**（`field_sufficient`） |
+| 空格短句切分 | ✅ **已实现**（硬标点 + 空格软切分，保护 `3 年`/`58 岁`/`非 HCC`/`Child-Pugh A`） |
 | 五阶段 SciencePal | ✅ 已接线；真实 Key 需自测 |
 | HCC-Fit 单次核查 | ✅ 已接线；真实 Key 需自测 |
 | 四维 / 证据 / 引文 / 注意点 / 原始返回 | ✅ |
@@ -23,7 +25,7 @@
 | 报告后补充资料 | ✅ 已改为“所需资料只读文本框 + 每条资料一条输入框”；全量重跑；新旧报告切换 |
 | Router 方案 A：先找候选论文 | ✅ 已加弹窗、候选列表、保存候选 md；**Router 服务未打包，需单独启动** |
 | Router 弹窗填 SciencePal Key | ✅ 已加；仅 balanced 用，关闭清空 |
-| Windows one-dir 构建 | ✅ `dist/HCC-Fit` |
+| Windows one-dir 构建 | ✅ `dist/HCC-Fit`（2026-10-30 已重建） |
 | macOS | ❌ 只有方案，未实施 |
 
 ### Simple Router（独立 FastAPI 服务）
@@ -106,6 +108,8 @@ desktop_build/HCC-Fit/HCC-Fit.exe
 
 ```bash
 cd desktop
+python tests/test_input_normalization.py   # 15/15：规则/追问抑制/空格切分/schema
+python tests/test_input_review.py          # 场景卡 UI（含“零追问”场景）
 python tests/test_supplement.py
 python tests/test_supplement_ui.py
 python tests/test_router_client.py
@@ -203,41 +207,40 @@ curl http://127.0.0.1:8080/healthz
 
 ---
 
-## 5. 当前必须知道的未完成项
+## 5. 未完成项与本次已完成项
 
-### P0 / 最近一次用户要求还没做
+### ✅ 已完成（2026-10-30 接手批次）
 
 1. **去掉“可选 AI 补充”**
-   - 当前 `app/input_review.py` 仍有 AI checkbox/Base/模型/Key/按钮；
-   - `app/input_normalization.py` 仍有 `extract_with_ai`/`apply_ai_candidates`；
-   - `app/ai_extract.py` 仍存在；
-   - 用户要求删除；需同步删测试/README。
+   - 删除 `app/ai_extract.py`；删除 `input_review.py` 里的 AI checkbox/Base/模型/Key/按钮与 `_ai_fill`；
+   - 删除 `input_normalization.py` 里的 `AIProvider` / `apply_ai_candidates` / `extract_with_ai` / `PROTECTED`；
+   - `HCC-Fit.spec` 的 hiddenimports 去掉 `ai_extract`；测试与 README 同步；
+   - 现在输入层**只走规则/术语表/医生确认**，不调用任何模型。
 
-2. **原话已有对应信息时不生成追问**
-   - 当前追问规则仍会对 `ambiguous` 字段发问；
-   - 需要先定义 `sufficient`（信息是否足够），推荐：
-     - 疾病：只有明确 HCC 才算足够；
-     - 治疗：明确切除/TACE/消融/系统治疗/移植才算足够；“刚切完”可不追问治疗大类；
-     - 结局：明确 OS/RFS/PHLF 等才算足够；
-     - 起点：明确“从手术日/今天”才算足够；
-   - 不能因为原话有“肝癌”就不问疾病类型。
+2. **原话已有对应信息时不生成追问（`sufficient`）**
+   - 新增 `field_sufficient()` / `sufficient_fields()`；追问只在信息不足时生成；
+   - 疾病：只有明确 HCC 才算足够（“肝癌/肝脏肿瘤/恶性肿瘤”仍追问）；
+   - 治疗：明确切除/TACE/消融/系统治疗/肝移植；“刚切完”不追问治疗大类；
+   - 结局：明确 OS / 复发（RFS）；只说“生存/预后”仍追问；
+   - 起点：明确手术日/治疗日/今天；问题：原话已写清楚想问什么；
+   - 场景卡新增“信息”列，逐字段显示“足够/—”；`input_session.json` 新增 `sufficient` 与 `concept_id`；
+   - 补充：原话完全没提疾病时也会追问疾病（此前没有入口，属于静默漏问）。
 
 3. **空格短句切分**
-   - 当前 `split_sentences()` 只按 `。！？；换行`；
-   - 计划：硬切标点 + 空格软切，保护 `3 年`、`58 岁`、`非 HCC`、`Child-Pugh A` 等；
-   - 用户已确认方案方向，尚未改代码。
+   - `split_sentences()` = 硬标点（`。！？；换行`）+ 空格软切分；
+   - 保护：数字+单位（`3 年`、`58 岁`、`1.5 cm`）、否定+内容（`非 HCC`）、拉丁复合名（`Child-Pugh A`、`hepatocellular carcinoma`）；
+   - 多个空格/全角空格/制表符视为明确分隔；
+   - 顺带支持“3 年”“6 个月”这类带空格的范围写法（→ 36 个月 / 6 个月）。
 
-### Router
+### P1 / 待决策
 
 4. **真实 filter agent ID / Key 未验证**
    - 默认 filter agent ID 已去掉全零占位；
    - 需真实 `SCIENCEPAL_FILTER_AGENT_ID` + Key 跑一次 balanced，确认 `degraded=false`。
 
-5. **Router 方案 A 只是可选前置**
-   - 没有自动替换 S1；
-   - 没有自动下载 PMC PDF；
-   - 候选 `.md` 只是摘要/题录；
-   - Router 服务不在 Windows 测试 zip 内。
+5. **Router 是否继续独立 HTTP 服务（待决策）**
+   - 现状：可选前置，不替换 S1；候选 `.md` 只是摘要/题录；Router 服务不在 Windows 测试 zip 内；
+   - 二选一：保持 HTTP sidecar，或改成直接 `import hccfit.strategies.run`（单 exe、无 8080）。
 
 6. **Docker 未实际 build**
    - Dockerfile 已改非 root + healthcheck + `.dockerignore`，但本机没有 docker。
@@ -246,7 +249,7 @@ curl http://127.0.0.1:8080/healthz
 
 7. macOS 只有方案，未实施。
 8. Windows exe 未签名；SmartScreen 提示；无安装包。
-9. 真实 SciencePal 五阶段 / HCC 单次在**新 exe**里的端到端，需要再跑一次。
+9. 真实 SciencePal 五阶段 / HCC 单次在**新 exe**里的端到端，需要再跑一次（本机无 Key，只跑了 stub `--smoke`）。
 10. Router 的 `run_id` 校验、prompt 注入防护、凭据日志等 P2 未做。
 
 ---
@@ -264,16 +267,13 @@ curl http://127.0.0.1:8080/healthz
 ## 7. 建议新会话的接手顺序
 
 1. 读 `HANDOFF.md`、`desktop/README.md`、`router/README.md`；
-2. 跑桌面 4 个测试 + `--smoke`；
+2. 跑桌面 6 个测试 + `--smoke`（见 3.2）；
 3. 跑 Router 11 个测试；
-4. 先做用户最近要求的三项：
-   - 去掉 AI UI/调用；
-   - 追问抑制（`sufficient`）；
-   - 空格短句切分；
+4. ~~先做用户最近要求的三项~~ ✅ 已完成（AI 移除 / 追问抑制 / 空格切分）；
 5. 再决定 Router：
    - 保持 HTTP sidecar；
    - 或改成直接 import `hccfit.strategies.run`（单 exe、无 8080）；
-6. 真 Key 端到端；
+6. 真 Key 端到端（五阶段 + HCC 单次 + Router balanced）；
 7. 再考虑 macOS / 安装包 / 签名。
 
 ### 判断“是否还要 Router 独立服务”
@@ -287,10 +287,13 @@ curl http://127.0.0.1:8080/healthz
 ## 8. 关键文件
 
 - 场景卡：`desktop/app/input_normalization.py`、`desktop/app/input_review.py`
+- 追问抑制：`desktop/app/input_normalization.py` 的 `field_sufficient()` / `sufficient_fields()`
+- 分句：`desktop/app/input_normalization.py` 的 `split_sentences()` / `_split_soft()` / `_join_on_space()`
 - 补充资料：`desktop/app/supplement.py`、`desktop/app/main_window.py`
 - Router 客户端：`desktop/app/router_client.py`、`desktop/app/router_dialog.py`
 - 五阶段：`desktop/core/planner.py`、`desktop/core/sciencepal.py`
 - Router 服务：`router/hccfit/`
+- 输入会话 schema：`desktop/resources/schemas/input_session.schema.json`
 - Router 检查报告：`docs/HCC-Fit_Simple_Router_检查报告_2026-10-29.md`
 - 输入归一方案：`docs/HCC-Fit_输入归一方案_2026-10-29.md`
 - 补充资料方案：`docs/HCC-Fit_报告后补充资料方案_2026-10-29.md`
@@ -299,4 +302,28 @@ curl http://127.0.0.1:8080/healthz
 
 ---
 
-*本包只读快照；未包含任何真实 Key 或患者工作区。*
+## 9. 本次接手变更记录（2026-10-30）
+
+| 项 | 结果 |
+|---|---|
+| 基线验证（改动前） | 桌面 6/6 通过、Router 11/11 通过 |
+| AI 候选层移除 | `app/ai_extract.py` 删除；`input_normalization.py` 删 3 个 AI 函数；`input_review.py` 删 AI 行；spec 同步 |
+| 追问抑制 | 新增 `field_sufficient()`；场景卡第 7 列“信息”；`sufficient` 写入 input_session |
+| 空格软切分 | `split_sentences()` 重写；保护数字+单位/否定/拉丁名；支持“3 年”→36 个月 |
+| 术语表 | 新增 `treatment.transplant`（肝移植） |
+| 测试 | 输入归一 12 → 15 项（含 schema 校验、AI 已移除断言）；场景卡加零追问场景 |
+| 构建 | PyInstaller one-dir 重建，`--smoke` 退出码 0 |
+| 版本控制 | 新增 git 基线（`.gitignore` 排除构建产物与运行期数据），便于后续 diff/回滚 |
+
+验证命令（在包根目录）：
+
+```bash
+cd desktop && python tests/test_input_normalization.py && python tests/test_input_review.py \
+  && python tests/test_supplement.py && python tests/test_supplement_ui.py \
+  && python tests/test_router_client.py && QT_QPA_PLATFORM=offscreen python tests/smoke.py
+cd ../router && python -m unittest discover -s tests -v
+```
+
+---
+
+*本包源码角色已从“只读快照”转为开发工作区；仍不含任何真实 Key 或患者工作区。*

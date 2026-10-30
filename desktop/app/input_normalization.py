@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-input_normalization.py — 单场景自由输入的规则层（v0.1）
+input_normalization.py — 单场景自由输入的规则层（v0.2）
 
 设计约束（来自交接表）：
 - 医生只写一段话；本模块把这段话拆成字段，不要求医生用标准词；
@@ -8,7 +8,9 @@ input_normalization.py — 单场景自由输入的规则层（v0.1）
 - 原话不覆盖；未知不补造；
 - "肝癌 / 肝脏肿瘤 / 恶性肿瘤" 永远不自动归一为 HCC；
 - 否定、疑似、既往、时间、冲突都保留，不自动选一个；
-- AI 只提供候选，不能覆盖规则给出的明确状态，也不能把模型概率当医学事实。
+- 只用规则/术语表/医生确认，不调用任何模型（AI 候选层已于 2026-10-30 移除）；
+- 原话里已经有足够信息时不再追问（见 field_sufficient）；
+- 分句 = 硬标点切分 + 空格软切分，数字+单位、否定、拉丁复合名不拆（见 split_sentences）。
 
 本模块不依赖 PySide6，可单独测试。
 """
@@ -21,7 +23,6 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable, Protocol
 
 # ---------------- 常量 ----------------
 
@@ -94,6 +95,7 @@ class FieldValue:
     confirm: str = "pending"          # pending / user_confirmed / user_edited / user_unknown
     candidates: list[dict] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
+    concept_id: str = ""              # 规则选中（或医生确认）的术语 id；自由编辑后为空
 
     def to_dict(self):
         d = asdict(self)
@@ -150,6 +152,7 @@ class InputSession:
             "conflicts": [c.to_dict() for c in self.conflicts],
             "followups": [f.to_dict() for f in self.followups],
             "confirmation": dict(self.confirmation),
+            "sufficient": sufficient_fields(self),
         }
 
     def pending_required(self) -> list[Followup]:
@@ -194,6 +197,71 @@ class InputSession:
         return session
 
 
+# ---------------- 信息充分性（决定要不要追问） ----------------
+
+# 明确写出的治疗大类（“刚切完”也落在 resection 上：大类已知，不追问大类）
+EXPLICIT_TREATMENT_CONCEPTS = frozenset({
+    "treatment.resection", "treatment.tace", "treatment.ablation",
+    "treatment.system", "treatment.transplant",
+})
+NO_TREATMENT_CONCEPTS = frozenset({"treatment.none", "treatment.no_surgery"})
+EXPLICIT_START_VALUES = ("手术日", "今天", "治疗日")
+EXPLICIT_START_CONCEPTS = ("start.surgery", "start.today")
+OS_RAW_RE = re.compile(r"OS|总生存|overall\s+survival", re.I)
+
+
+def _user_settled(f: FieldValue) -> bool:
+    """医生在场景卡里改/确认过，且状态是已归一。"""
+    return (f.confirm in ("user_edited", "user_confirmed")
+            and f.status == "normalized" and bool(f.normalized))
+
+
+def field_sufficient(session: InputSession, name: str) -> bool:
+    """该字段的信息是否足够：足够就不再生成追问。
+
+    阈值按交接要求：
+    - 疾病：只有明确 HCC 才算足够（“肝癌”不等于 HCC）；
+    - 治疗：明确切除/TACE/消融/系统治疗/移植；“刚切完”不追问大类；
+    - 结局：明确 OS/复发（RFS），只说“生存/预后”不算；
+    - 起点：明确手术日/治疗日/今天；
+    - 问题：原话已经写清楚想问什么。
+    """
+    f = session.fields.get(name)
+    if f is None or f.status == "conflict":
+        return False
+    if name == "disease":
+        return f.status == "normalized" and f.normalized == "HCC"
+    if name == "treatment":
+        if f.status in ("negated", "normalized") and f.concept_id in NO_TREATMENT_CONCEPTS:
+            return True
+        if f.concept_id in EXPLICIT_TREATMENT_CONCEPTS:
+            return True
+        return _user_settled(f) and "类型未明确" not in (f.normalized or "")
+    if name == "outcome":
+        if f.concept_id == "outcome.os":
+            return bool(OS_RAW_RE.search(f.raw or ""))
+        if f.concept_id == "outcome.recurrence":
+            return True
+        return _user_settled(f) and f.normalized not in ("未明确", "预测需求未明确")
+    if name == "start_point":
+        return (f.status == "normalized"
+                and (f.normalized in EXPLICIT_START_VALUES
+                     or f.concept_id in EXPLICIT_START_CONCEPTS))
+    if name == "intent":
+        return f.status == "normalized" and f.normalized not in ("", "未明确")
+    if name in ("horizon",):
+        return f.status == "normalized" and bool(f.normalized)
+    if name == "stage":
+        return f.status in ("normalized", "ambiguous") and bool(f.normalized)
+    if name == "subject":
+        return f.status == "normalized"
+    return f.status == "normalized"
+
+
+def sufficient_fields(session: InputSession) -> dict[str, bool]:
+    return {name: field_sufficient(session, name) for name in FIELD_ORDER}
+
+
 # ---------------- 术语表 ----------------
 
 
@@ -222,20 +290,88 @@ def terms_by_concept(terms) -> dict[str, Term]:
 
 # ---------------- 句子 / 上下文 ----------------
 
+HARD_BREAK_RE = re.compile(r"[。！？；\n\r]+")
+SOFT_BREAK_RE = re.compile(r"[ \t\u3000]+")
+
+# 空格软切分的“保护边界”：这些位置的空格是短语内部空格，不能当分隔符
+_NUM_TAIL_RE = re.compile(r"[0-9０-９一二三四五六七八九十两半]$")
+_UNIT_HEADS = ("年", "岁", "个月", "月", "星期", "周", "天", "日", "小时", "分钟",
+               "次", "例", "cm", "CM", "mm", "MM", "ml", "mL", "kg", "g", "mg",
+               "dL", "%", "％")
+_NEG_TAILS = ("非", "无", "未", "不", "否认", "排除", "除外", "没有", "未见", "未发现",
+              "不是", "并非")
+_LATIN_TAIL_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$")
+_LATIN_HEAD_RE = re.compile(r"[A-Za-z0-9.]+")
+
+
+def _join_on_space(left: str, right: str, gap: str) -> bool:
+    """判断 left <gap> right 是否应保持为同一短语（True = 不切）。"""
+    if not left or not right:
+        return False
+    if "\t" in gap or "\u3000" in gap or len(gap) > 1:
+        return False                      # 制表符/全角空格/多个空格 = 明确分隔
+    # 1) 数字（含中文数字）+ 单位：3 年、58 岁、1.5 cm、30 %
+    if _NUM_TAIL_RE.search(left) and right.startswith(_UNIT_HEADS):
+        return True
+    # 2) 否定词 + 内容：非 HCC、无 腹水、未见 复发
+    if left.endswith(_NEG_TAILS):
+        if re.match(r"[\u4e00-\u9fffA-Za-z0-9]", right):
+            return True
+    # 3) 拉丁复合名：Child-Pugh A、hepatocellular carcinoma、BCLC B、ECOG 0
+    if _LATIN_TAIL_RE.search(left):
+        head = _LATIN_HEAD_RE.match(right)
+        if head:
+            return True
+    return False
+
+
+def _soft_split(text: str, start: int, end: int):
+    """在 [start, end) 内按空格软切分，并合并受保护的边界。"""
+    pieces, pos = [], start
+    for m in SOFT_BREAK_RE.finditer(text, start, end):
+        pieces.append((pos, m.start(), m.group(0)))
+        pos = m.end()
+    pieces.append((pos, end, ""))
+    merged: list[tuple[int, int]] = []
+    for s, e, _gap_after in pieces:
+        if s >= e:
+            continue
+        if merged:
+            prev_s, prev_e = merged[-1]
+            gap = text[prev_e:s]
+            if _join_on_space(text[prev_s:prev_e].strip(), text[s:e].strip(), gap):
+                merged[-1] = (prev_s, e)
+                continue
+        merged.append((s, e))
+    out = []
+    for s, e in merged:
+        seg = text[s:e]
+        lead = len(seg) - len(seg.lstrip())
+        trail = len(seg.rstrip())
+        if trail <= lead:
+            continue
+        out.append((seg.strip(), s + lead, s + trail))
+    return out
+
 
 def split_sentences(text: str):
-    """保留字符偏移的分句。"""
-    out, start = [], 0
-    for m in re.finditer(r"[。！？；\n]", text):
-        end = m.end()
-        seg = text[start:end].strip()
-        if seg:
-            out.append((seg, start, end))
-        start = end
-    if start < len(text):
-        seg = text[start:].strip()
-        if seg:
-            out.append((seg, start, len(text)))
+    """保留字符偏移的分句：硬标点切分 + 空格软切分。
+
+    硬切：[。！？；换行]
+    软切：单个空格/连续空格；但数字+单位（3 年、58 岁）、否定+内容（非 HCC）、
+         拉丁复合名（Child-Pugh A、hepatocellular carcinoma）之间的空格保留。
+    返回 [(句子原文, start, end)]，start/end 指向实际内容（不含首尾空白）。
+    """
+    text = text or ""
+    out = []
+    pos = 0
+    for m in HARD_BREAK_RE.finditer(text):
+        stop = m.end()
+        if stop > pos:
+            out.extend(_soft_split(text, pos, stop))
+        pos = stop
+    if pos < len(text):
+        out.extend(_soft_split(text, pos, len(text)))
     return out
 
 
@@ -330,6 +466,7 @@ class RuleExtractor:
                     status=status if status != "normalized" else "normalized",
                     source_span=[start, end], source_sentence=sentence,
                     candidates=[{"source": "rule", "concept_id": term.concept_id}],
+                    concept_id=term.concept_id,
                 ))
 
         self._resolve_disease(session, by_field.get("disease") or [])
@@ -482,9 +619,9 @@ class RuleExtractor:
         f_h = session.fields["horizon"]
         f_d = session.fields["postop_duration"]
         # 术后 X 年：先记为已术后时长
-        m = re.search(r"术后\s*(一年|1年|两年|2年|三年|3年|五年|5年)", text)
+        m = re.search(r"术后\s*(一年|1\s*年|两年|2\s*年|三年|3\s*年|五年|5\s*年)", text)
         if m:
-            val = HORIZON_MONTHS.get(m.group(1))
+            val = HORIZON_MONTHS.get(re.sub(r"\s+", "", m.group(1)))
             if val:
                 sess, start, end = sentence_at(text, m.start(), m.end())
                 f_d.raw = m.group(0)
@@ -497,6 +634,7 @@ class RuleExtractor:
                     f_start.raw = text[m.start():m.end()]
                     f_start.normalized = "今天"
                     f_start.status = "normalized"
+                    f_start.concept_id = "start.today"
                     f_start.source_span = [m.start(), m.end()]
                     f_start.source_sentence = sess
                 else:
@@ -517,11 +655,28 @@ class RuleExtractor:
                 continue
             self._set(f_h, c, "normalized")
             break
+        # 范围兜底：术语表只有 12/36/60 个月，这里容忍“3 年”“6 个月”等带空格/任意月数写法
+        if f_h.status != "normalized":
+            for m in re.finditer(r"(\d+)\s*(年|个月|月)", text):
+                prefix = text[max(0, m.start() - 4):m.start()]
+                if re.search(r"术后|手术后|切除后|治疗后", prefix):
+                    continue
+                months = int(m.group(1)) * (12 if m.group(2) == "年" else 1)
+                if months <= 0 or months > 120:
+                    continue
+                sess, _s, _e = sentence_at(text, m.start(), m.end())
+                f_h.raw = m.group(0)
+                f_h.normalized = "%d个月" % months
+                f_h.status = "normalized"
+                f_h.source_span = [m.start(), m.end()]
+                f_h.source_sentence = sess
+                break
         # “未来/以后” + 术后时长 → 从今天起算
         if f_d.status == "normalized" and re.search(r"未来|以后|接下来", text) and f_start.status != "normalized":
             f_start.raw = f_d.raw
             f_start.normalized = "今天"
             f_start.status = "normalized"
+            f_start.concept_id = "start.today"
             f_start.source_span = f_d.source_span
             f_start.source_sentence = f_d.source_sentence
 
@@ -576,73 +731,77 @@ class RuleExtractor:
         f.status = status or c.get("status") or "unknown"
         f.source_span = c.get("span")
         f.source_sentence = c.get("sentence") or ""
+        f.concept_id = c.get("concept_id") or ""
+        if f.status == "conflict":
+            f.concept_id = ""
 
     def _conflict(self, session, field_name, message, cands):
         spans = [c.get("span") for c in cands if c.get("span")]
         session.conflicts.append(Conflict(field=field_name, message=message, spans=spans))
 
-    # ---- 追问 ----
+    # ---- 追问（只问信息不足的字段） ----
     @staticmethod
     def _rebuild_followups(session: InputSession):
         session.followups = []
         d = session.fields["disease"]
-        if d.status == "ambiguous":
-            session.followups.append(Followup(
-                "q_disease", "disease",
-                "请确认疾病类型：是 HCC、其他类型，还是尚未明确？",
-                ["HCC", "其他类型", "尚未明确", "不知道"]))
-        elif d.status == "suspected":
-            session.followups.append(Followup(
-                "q_disease", "disease",
-                "“疑似 HCC”是否已有确诊依据？目前按疑似记录，不能当确诊。",
-                ["已确诊 HCC", "仍疑似", "已排除 HCC", "不知道"]))
-        elif d.status == "historical":
-            session.followups.append(Followup(
-                "q_disease", "disease",
-                "HCC 是既往史还是本次诊断？当前病灶的性质是什么？",
-                ["既往 HCC，本次未定", "本次 HCC", "本次非 HCC", "不知道"]))
-        elif d.status == "negated":
-            session.followups.append(Followup(
-                "q_disease", "disease",
-                "已排除 HCC 的依据是什么？当前诊断是什么？",
-                ["其他肝脏肿瘤", "良性病变", "仍未明确", "不知道"]))
-        elif d.status == "out_of_scope":
-            session.followups.append(Followup(
-                "q_disease", "disease",
-                "首版只支持 HCC；该诊断不在范围内，需要说明范围限制。",
-                ["返回修改", "仅查看范围说明"]))
-        elif d.status == "conflict":
-            session.followups.append(Followup(
-                "q_disease", "disease",
-                "HCC 的表达前后冲突，请确认以哪一句为准。",
-                ["以阳性为准", "以否定为准", "都不确定", "不知道"]))
+        if not field_sufficient(session, "disease"):
+            if d.status in ("unknown", "ambiguous"):
+                session.followups.append(Followup(
+                    "q_disease", "disease",
+                    "请确认疾病类型：是 HCC、其他类型，还是尚未明确？",
+                    ["HCC", "其他类型", "尚未明确", "不知道"]))
+            elif d.status == "suspected":
+                session.followups.append(Followup(
+                    "q_disease", "disease",
+                    "“疑似 HCC”是否已有确诊依据？目前按疑似记录，不能当确诊。",
+                    ["已确诊 HCC", "仍疑似", "已排除 HCC", "不知道"]))
+            elif d.status == "historical":
+                session.followups.append(Followup(
+                    "q_disease", "disease",
+                    "HCC 是既往史还是本次诊断？当前病灶的性质是什么？",
+                    ["既往 HCC，本次未定", "本次 HCC", "本次非 HCC", "不知道"]))
+            elif d.status == "negated":
+                session.followups.append(Followup(
+                    "q_disease", "disease",
+                    "已排除 HCC 的依据是什么？当前诊断是什么？",
+                    ["其他肝脏肿瘤", "良性病变", "仍未明确", "不知道"]))
+            elif d.status == "out_of_scope":
+                session.followups.append(Followup(
+                    "q_disease", "disease",
+                    "首版只支持 HCC；该诊断不在范围内，需要说明范围限制。",
+                    ["返回修改", "仅查看范围说明"]))
+            elif d.status == "conflict":
+                session.followups.append(Followup(
+                    "q_disease", "disease",
+                    "HCC 的表达前后冲突，请确认以哪一句为准。",
+                    ["以阳性为准", "以否定为准", "都不确定", "不知道"]))
 
         t = session.fields["treatment"]
-        if t.status in ("ambiguous", "conflict"):
+        if t.status in ("ambiguous", "conflict") and not field_sufficient(session, "treatment"):
             session.followups.append(Followup(
                 "q_treatment", "treatment",
                 "请确认治疗类型（切除/TACE/消融/系统治疗）、是否完成、是否根治性？",
                 ["已切除（根治性）", "已切除（是否根治不明）", "TACE/消融/系统治疗", "尚未治疗", "不知道"]))
         s = session.fields["start_point"]
-        if s.status in ("unknown", "ambiguous"):
+        if s.status in ("unknown", "ambiguous") and not field_sufficient(session, "start_point"):
             session.followups.append(Followup(
                 "q_start", "start_point",
                 "预测范围从手术日、治疗日开始，还是从今天起算？",
                 ["手术日", "治疗日", "今天", "不知道"]))
         o = session.fields["outcome"]
-        if o.status in ("unknown", "ambiguous", "conflict"):
+        if o.status in ("unknown", "ambiguous", "conflict") and not field_sufficient(session, "outcome"):
             session.followups.append(Followup(
                 "q_outcome", "outcome",
                 "想预测的是总生存（OS）、复发（RFS/早期复发），还是其他结局？",
                 ["总生存 OS", "复发 RFS", "其他", "不知道"]))
         it = session.fields["intent"]
-        if it.status == "unknown":
+        if not field_sufficient(session, "intent"):
             session.followups.append(Followup(
                 "q_intent", "intent",
                 "你想回答的核心问题是什么？（例如：这个模型能不能用于术前判断 1 年内复发）",
                 ["自定义输入", "不知道"]))
         sub = session.fields["subject"]
-        if sub.status == "ambiguous":
+        if sub.status == "ambiguous" and not field_sufficient(session, "subject"):
             session.followups.append(Followup(
                 "q_subject", "subject",
                 "这段信息是患者本人提供，还是家属代问？",
@@ -718,54 +877,3 @@ class RuleExtractor:
             scenario["paper_text"] = paper_text
         return scenario
 
-
-# ---------------- AI 候选层 ----------------
-
-class AIProvider(Protocol):
-    def extract(self, raw_text: str, session: InputSession) -> list[dict]:
-        """返回 [{field, concept_id, raw, span?}]，只作为候选。"""
-
-
-PROTECTED = {"negated", "historical", "suspected", "out_of_scope", "conflict", "normalized"}
-
-
-def apply_ai_candidates(session: InputSession, candidates, terms):
-    """AI 候选只补 unknown/ambiguous；不覆盖否定/既往/疑似/超范围/已归一。"""
-    by_id = terms_by_concept(terms)
-    for c in candidates or []:
-        field_name = c.get("field")
-        concept_id = c.get("concept_id")
-        if field_name not in session.fields or concept_id not in by_id:
-            continue
-        f = session.fields[field_name]
-        if f.status in PROTECTED:
-            f.candidates.append(dict(c, source="ai", accepted=False,
-                                     reason="规则已给出%s，AI候选不覆盖" % f.status))
-            continue
-        term = by_id[concept_id]
-        if field_name == "disease" and term.concept_id == "disease.hcc":
-            # 明确 HCC 已由规则归一（normalized，受保护）；其余情况 AI 一律不得提成 HCC
-            f.candidates.append(dict(c, source="ai", accepted=False,
-                                     reason="肝癌/肝脏肿瘤/恶性肿瘤不得由AI自动归一为HCC"))
-            continue
-        f.candidates.append(dict(c, source="ai", accepted=True))
-        f.normalized = term.canonical
-        f.status = "ambiguous"          # AI 候选仍需医生确认
-        f.flags.append("AI候选，需医生确认")
-        if c.get("raw") and not f.raw:
-            f.raw = c["raw"]
-    RuleExtractor._rebuild_followups(session)
-    return session
-
-
-def extract_with_ai(raw_text, terms_path, provider: AIProvider | None = None):
-    rules = RuleExtractor(terms_path)
-    session = rules.extract(raw_text)
-    if provider is not None:
-        try:
-            apply_ai_candidates(session, provider.extract(raw_text, session), rules.terms)
-        except Exception as exc:  # noqa: BLE001
-            # AI 失败不阻塞规则结果，也不产生“冲突”；只记录提示
-            session.fields["disease"].flags.append(
-                "AI 提取失败，已保留规则结果：%s" % type(exc).__name__)
-    return session

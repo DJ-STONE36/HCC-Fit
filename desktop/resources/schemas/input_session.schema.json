@@ -33,6 +33,7 @@
           "confirm": {
             "enum": ["pending", "user_confirmed", "user_edited", "user_unknown"]
           },
+          "concept_id": {"type": "string"},
           "candidates": {"type": "array"},
           "flags": {"type": "array", "items": {"type": "string"}}
         }
@@ -41,6 +42,11 @@
     "data_available": {"type": "array"},
     "conflicts": {"type": "array"},
     "followups": {"type": "array"},
+    "sufficient": {
+      "type": "object",
+      "description": "每个字段的信息是否足够；足够则不再生成追问",
+      "additionalProperties": {"type": "boolean"}
+    },
     "confirmation": {
       "type": "object",
       "required": ["status"],

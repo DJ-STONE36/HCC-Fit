@@ -2,6 +2,10 @@
 desktop_build/
 desktop/dist/
 desktop/build/
+desktop/smoke_out/
+desktop/smoke_data/
+desktop/tests/_tmp*/
+_smoke_exe*/
 __pycache__/
 *.py[cod]
 *.egg-info/

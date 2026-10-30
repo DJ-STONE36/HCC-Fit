@@ -7,16 +7,15 @@ from html import escape
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QHeaderView,
+    QComboBox, QDialog, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from app import input_store
-from app.ai_extract import OpenAICompatibleProvider
 from app.input_normalization import (
-    FIELD_LABEL, FIELD_ORDER, STATUS_LABEL, FieldValue, InputSession,
-    RuleExtractor, extract_with_ai,
+    FIELD_LABEL, FIELD_ORDER, STATUS_LABEL, InputSession,
+    RuleExtractor, field_sufficient, sufficient_fields,
 )
 
 STATUS_COLOR = {
@@ -59,25 +58,8 @@ class InputReviewDialog(QDialog):
         raw.setFixedHeight(84)
         lay.addWidget(raw)
 
-        ai_row = QHBoxLayout()
-        self.ai_check = QCheckBox("AI 补充候选（可选）")
-        self.ai_base = QLineEdit("https://api.siliconflow.cn/v1")
-        self.ai_model = QLineEdit()
-        self.ai_model.setPlaceholderText("模型名，例如 Qwen/Qwen2.5-7B-Instruct")
-        self.ai_key = QLineEdit()
-        self.ai_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.ai_key.setPlaceholderText("AI API Key（只放内存，不写盘）")
-        self.ai_btn = QPushButton("用 AI 补充")
-        self.ai_btn.clicked.connect(self._ai_fill)
-        ai_row.addWidget(self.ai_check)
-        ai_row.addWidget(self.ai_base, 2)
-        ai_row.addWidget(self.ai_model, 2)
-        ai_row.addWidget(self.ai_key, 2)
-        ai_row.addWidget(self.ai_btn)
-        lay.addLayout(ai_row)
-
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["字段", "原话", "整理值（可改）", "状态", "来源片段", "确认"])
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(["字段", "原话", "整理值（可改）", "状态", "来源片段", "确认", "信息"])
         self.table.setWordWrap(True)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setDefaultSectionSize(30)
@@ -88,6 +70,7 @@ class InputReviewDialog(QDialog):
         h.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         h.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         h.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        h.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemChanged.connect(self._on_table_edit)
         lay.addWidget(self.table, 3)
 
@@ -142,6 +125,7 @@ class InputReviewDialog(QDialog):
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.row_fields.append((kind, key))
+            enough = kind == "field" and field_sufficient(self.session, key)
             vals = [
                 FIELD_LABEL.get(f.field, f.field) if kind == "field" else "资料",
                 f.raw or "—",
@@ -149,6 +133,7 @@ class InputReviewDialog(QDialog):
                 STATUS_LABEL.get(f.status, f.status),
                 "[%d,%d]" % tuple(f.source_span) if f.source_span else "—",
                 f.confirm,
+                ("足够" if enough else "—") if kind == "field" else "—",
             ]
             for col, text in enumerate(vals):
                 item = QTableWidgetItem(str(text))
@@ -160,6 +145,9 @@ class InputReviewDialog(QDialog):
                     fg, bg = STATUS_COLOR.get(f.status, ("#333", "#f4f6f8"))
                     item.setForeground(QBrush(QColor(fg)))
                     item.setBackground(QBrush(QColor(bg)))
+                if col == 6 and enough:
+                    item.setForeground(QBrush(QColor("#1e8449")))
+                    item.setToolTip("原话已提供足够信息，不再追问")
                 if col == 1 and f.source_sentence:
                     item.setToolTip(f.source_sentence)
                 if col == 4 and f.source_sentence:
@@ -185,6 +173,7 @@ class InputReviewDialog(QDialog):
         f.normalized = text
         f.status = "normalized"
         f.confirm = "user_edited"
+        f.concept_id = ""          # 医生改写后不再对应术语表条目，按自由文本记录
         self.session.conflicts = [c for c in self.session.conflicts if c.field != key]
         # 医生直接改了字段，就把对应追问视为已回答；冲突清空后关闭 q_conflict
         for fu in self.session.followups:
@@ -200,6 +189,10 @@ class InputReviewDialog(QDialog):
         self.table.item(idx, 3).setForeground(QBrush(QColor("#1e8449")))
         self.table.item(idx, 3).setBackground(QBrush(QColor("#eafaf1")))
         self.table.item(idx, 5).setText("user_edited")
+        enough = field_sufficient(self.session, key)
+        self.table.item(idx, 6).setText("足够" if enough else "—")
+        self.table.item(idx, 6).setForeground(
+            QBrush(QColor("#1e8449" if enough else "#333")))
         self._loading = False
         self._update_confirm()
 
@@ -342,38 +335,19 @@ class InputReviewDialog(QDialog):
             self.hint.setText("还有 %d 个必答问题。" % len(pending))
             self.ok_btn.setEnabled(False)
         else:
-            self.hint.setText("字段已整理完成；确认后会冻结为 input_session 并进入核查。")
+            suf = sufficient_fields(self.session)
+            key_fields = ("disease", "treatment", "outcome", "start_point", "intent")
+            if all(suf.get(k) for k in key_fields):
+                self.hint.setText("原话信息已足够（疾病/治疗/结局/起点/问题），不再追问；"
+                                  "确认后会冻结为 input_session 并进入核查。")
+            else:
+                self.hint.setText("字段已整理完成；确认后会冻结为 input_session 并进入核查。")
             self.ok_btn.setEnabled(True)
 
     def _reparse(self):
         if QMessageBox.question(self, "重新解析", "会丢弃当前修改，重新从原话解析，继续？") != QMessageBox.StandardButton.Yes:
             return
         self.session = self.rules.extract(self.raw_text)
-        self._populate_table()
-        self._populate_followups()
-        self._update_confirm()
-
-    def _ai_fill(self):
-        if not self.ai_check.isChecked():
-            QMessageBox.information(self, "AI 补充", "先勾选“AI 补充候选”。")
-            return
-        if not (self.ai_key.text().strip() and self.ai_model.text().strip()):
-            QMessageBox.warning(self, "AI 补充", "需要填 AI Base、模型名和 API Key。")
-            return
-        provider = OpenAICompatibleProvider(
-            self.ai_base.text().strip(),
-            self.ai_key.text().strip(),
-            self.ai_model.text().strip(),
-            self.terms_path,
-        )
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            self.session = extract_with_ai(self.raw_text, self.terms_path, provider)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "AI 补充失败", "%s: %s" % (type(exc).__name__, exc))
-        finally:
-            QApplication.restoreOverrideCursor()
-        self.ai_key.clear()
         self._populate_table()
         self._populate_followups()
         self._update_confirm()

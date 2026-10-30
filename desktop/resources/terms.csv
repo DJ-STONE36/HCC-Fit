@@ -9,6 +9,7 @@ treatment.resection,已接受切除,treatment,肝切除|切除|刚切完|刚做�
 treatment.tace,TACE,treatment,TACE|介入化疗|肝动脉化疗栓塞,normalized,hcc,
 treatment.ablation,消融,treatment,消融|射频消融|微波消融,normalized,hcc,
 treatment.system,系统治疗,treatment,系统治疗|靶向治疗|免疫治疗|PD-1,normalized,hcc,
+treatment.transplant,肝移植,treatment,肝移植|肝移植术|肝脏移植,normalized,hcc,
 treatment.postop,治疗后，治疗类型未明确,treatment,术后|手术后|切除后,ambiguous,hcc,治疗类型与时间未明确
 treatment.none,未治疗,treatment,未治疗|没有治疗|未接受治疗,negated,hcc,
 treatment.no_surgery,未手术,treatment,未手术|没有手术|未做手术,negated,hcc,
