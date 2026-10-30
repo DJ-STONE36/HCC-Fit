@@ -167,16 +167,15 @@ def _dialog_with_papers():
          "year": 2023, "journal": "Eur Radiol", "doi": "10.1/x",
          "readability": {"level": "abstract_only"}, "why": ["匹配"], "risk": ["回顾性"]},
         {"pmid": "222", "title": "Second paper", "year": 2021, "journal": "Ann Surg",
+         "doi": "10.2/y",
          "readability": {"level": "fulltext"}, "why": [], "risk": []},
     ]
     dlg._on_done({"papers": papers, "warnings": [], "strategy_used": "fast"})
     return dlg
 
 
-def case_open_link_without_selection():
+def _open_with(dlg):
     from app import router_dialog as rd
-    dlg = _dialog_with_papers()
-    dlg.table.setCurrentCell(-1, -1)
     opened = []
     orig = rd.open_external_url
     rd.open_external_url = lambda url: (opened.append(url) or (True, "test"))
@@ -184,9 +183,63 @@ def case_open_link_without_selection():
         dlg.open_fulltext()
     finally:
         rd.open_external_url = orig
+    return opened
+
+
+def case_open_selected_row():
+    dlg = _dialog_with_papers()
+    try:
+        dlg.table.clearSelection()
+        dlg.table.selectRow(1)                 # 选第二篇
+        opened = _open_with(dlg)
+    finally:
         dlg.close()
-    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/111/"], opened
-    return "未选行时打开第一篇（不再无反应）"
+    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/222/"], opened
+    return "选哪篇开哪篇（第二篇）"
+
+
+def case_open_multi_selected():
+    from PySide6.QtWidgets import QTableWidgetSelectionRange
+    dlg = _dialog_with_papers()
+    try:
+        dlg.table.clearSelection()
+        dlg.table.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 5), True)
+        opened = _open_with(dlg)
+    finally:
+        dlg.close()
+    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/111/",
+                      "https://pubmed.ncbi.nlm.nih.gov/222/"], opened
+    return "多选两篇同时打开"
+
+
+def case_open_checked_fallback():
+    from PySide6.QtCore import Qt
+    dlg = _dialog_with_papers()
+    try:
+        dlg.table.clearSelection()
+        for row in range(dlg.table.rowCount()):     # 只勾第二篇
+            cell = dlg.table.item(row, 0)
+            cell.setCheckState(Qt.CheckState.Unchecked)
+        dlg.table.item(1, 0).setCheckState(Qt.CheckState.Checked)
+        opened = _open_with(dlg)
+    finally:
+        dlg.close()
+    assert opened == ["https://pubmed.ncbi.nlm.nih.gov/222/"], opened
+    return "没选行时按勾选打开"
+
+
+def case_copy_doi_multi():
+    from PySide6.QtWidgets import QApplication, QTableWidgetSelectionRange
+    dlg = _dialog_with_papers()
+    try:
+        dlg.table.clearSelection()
+        dlg.table.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 5), True)
+        dlg.copy_doi()
+    finally:
+        dlg.close()
+    got = QApplication.clipboard().text()
+    assert got == "10.1/x\n10.2/y", repr(got)
+    return "复制 DOI 支持多选（换行分隔）"
 
 
 def case_open_external_fallback():
@@ -269,7 +322,10 @@ def main():
     check("后台线程：内置引擎", case_worker_builtin)
     check("后台线程：外部 HTTP", case_worker_http)
     check("对话框只有内置引擎", case_dialog)
-    check("打开链接（未选行）", case_open_link_without_selection)
+    check("打开链接（选中行）", case_open_selected_row)
+    check("打开链接（多选）", case_open_multi_selected)
+    check("打开链接（勾选兜底）", case_open_checked_fallback)
+    check("复制 DOI（多选）", case_copy_doi_multi)
     check("打开链接多级兜底", case_open_external_fallback)
     check("默认浏览器命令行", case_build_cmdline)
     check("标题换行完整显示", case_titles_wrap)
