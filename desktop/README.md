@@ -17,6 +17,8 @@ python main.py
 
 或双击 `run_desktop.bat`。
 
+![主窗口：1 大脑 / 2 场景 / 3 论文](docs/main_window.png)
+
 ## 当前功能（P0–P4 + 输入层）
 
 - 场景：**一个自由输入框**（一段话）+ 解析后的可编辑场景卡；追问、确认后才进入核查；
@@ -102,35 +104,30 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
 （`app/router_engine.py` 调用 `hccfit.strategies.run`）：
 
 - **不需要单独启动服务、不占 8080、不需要 uvicorn**；打包时 `router/hccfit` 已随 exe 一起带走；
-- 打开对话框即显示引擎状态（是否可用、策略、Key / filter agent 是否配置）；
+- 对话框只显示**内置引擎**状态（是否可用、策略、Key / filter agent 是否配置）；不再有“检索方式”切换；
 - 选 `fast`（5–10 秒）或 `balanced`（60–90 秒），选 k（1–8），点 **“一键检索候选”**；
-- `balanced` 需要 **SciencePal Key**（弹窗内填写，只放内存，关闭清空）和 **filter agent ID**
-  （弹窗内可填，或配环境变量 `SCIENCEPAL_FILTER_AGENT_ID`）；缺 filter agent 会明确降级为 fast；
+- **SciencePal Key 只有一处**：左侧最上方 **“1 · 大脑 / SciencePal 连接”**；弹窗从那里取，不再重复输入；
+  空/非 ASCII/含空格会实时红字警告，`start_run` 与 balanced 检索也会拦住并提示；
+- **filter agent ID 不再在界面填写**：只认环境变量 `SCIENCEPAL_FILTER_AGENT_ID`（未配置时 balanced 会降级为 fast，并在状态行与警告区说明）；
 - 勾选候选后保存为 `router_candidates_*.md` 并加入论文列表；
 - **这只是题录/摘要，不是全文**；S2 四维核查仍需 PDF 或正文；
 - 该步骤是**可选前置**，不替换 S1，五阶段 Agent 逻辑不变。
 
-接入细节（官方 Agent 规则、fast vs balanced、五阶段、错误码）见
+接入细节（官方 Agent 规则、fast vs balanced 的提示词差异、五阶段、错误码）见
 [`docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`](../docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md)。
 
-仍支持外部 HTTP 服务（多端共用/远程部署时）：对话框里把“检索方式”切到
-“外部 Router 服务（HTTP）”，或设：
-
-```bash
-set HCCFIT_ROUTER_URL=http://127.0.0.1:8080
-```
+**外部 HTTP 服务**（`router/` + `RouterClient` + `/v1/search`）作为核心代码保留，供多端/远程部署与命令行使用，
+但**界面不再提供入口**；需要时用 `RouterClient`/`curl` 直连，或双击包根目录 `启动 Router 服务.bat`。
+服务端默认不鉴权（`HCCFIT_ROUTER_TOKEN` 留空），仅远程部署时用环境变量配置。
 
 开发态内置引擎默认找包内同级 `router/`；也可用 `HCCFIT_ROUTER_DIR` 指向别处。
-外部服务**默认不鉴权**（服务端 `HCCFIT_ROUTER_TOKEN` 留空即可）；界面不再要求填 token，仅远程部署时用环境变量配置。
-
-> 如果外部服务报“目标计算机积极拒绝（10061）”，说明 8080 上没有服务：对话里点“改用内置引擎重试”，或双击包根目录的 `启动 Router 服务.bat`。
 
 ![候选论文（内置 Router，一键检索）](docs/router_dialog.png)
 
 测试：
 
 ```bash
-python tests/test_router_engine.py   # 内置引擎：状态/参数透传/错误映射/对话框 7 项
+python tests/test_router_engine.py   # 内置引擎：状态/参数透传/错误映射/对话框 6 项
 python tests/test_router_client.py   # Router 场景映射
 ```
 

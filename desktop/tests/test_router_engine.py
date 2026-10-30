@@ -137,43 +137,22 @@ def case_worker_http():
         rc.RouterClient = orig
     assert captured["url"] == "http://127.0.0.1:8080" and captured["token"] == "tok"
     assert got and got[0]["strategy_used"] == "fast", got
-    return "外部 HTTP 模式仍可用"
+    return "外部 HTTP 核心代码仍保留（界面不暴露）"
 
 
 def case_dialog():
     from PySide6.QtWidgets import QApplication
     from app.router_dialog import RouterDialog
     QApplication.instance() or QApplication([])
-    dlg = RouterDialog(SCENARIO)
-    assert dlg.current_engine() == "builtin", dlg.current_engine()
-    assert dlg.external_row.isHidden(), "内置模式不该显示地址栏"
+    dlg = RouterDialog(SCENARIO, "sp_live_abcdefghijklmnop")
+    assert not hasattr(dlg, "engine"), "界面不应再有检索方式下拉框"
+    assert not hasattr(dlg, "external_row"), "界面不应再有外部服务地址栏"
+    assert not hasattr(dlg, "filter_agent"), "界面不应再要求 filter agent ID"
     assert "内置引擎可用" in dlg.engine_msg.text(), dlg.engine_msg.text()
+    assert "已配置" in dlg.engine_msg.text(), dlg.engine_msg.text()
     assert dlg.search_btn.isEnabled()
-    dlg.engine.setCurrentIndex(dlg.engine.findData("http"))
-    assert not dlg.external_row.isHidden(), "外部模式应显示地址栏"
-    dlg.engine.setCurrentIndex(dlg.engine.findData("builtin"))
-    assert dlg.external_row.isHidden()
     dlg.close()
-    return "默认内置、一键可检索；可切外部服务"
-
-
-def case_env_defaults_to_http():
-    from PySide6.QtWidgets import QApplication
-    from app.router_dialog import RouterDialog
-    QApplication.instance() or QApplication([])
-    old = os.environ.get("HCCFIT_ROUTER_URL")
-    os.environ["HCCFIT_ROUTER_URL"] = "http://127.0.0.1:9999"
-    try:
-        dlg = RouterDialog(SCENARIO)
-        assert dlg.current_engine() == "http", dlg.current_engine()
-        assert dlg.url.text() == "http://127.0.0.1:9999"
-        dlg.close()
-    finally:
-        if old is None:
-            os.environ.pop("HCCFIT_ROUTER_URL", None)
-        else:
-            os.environ["HCCFIT_ROUTER_URL"] = old
-    return "设了 HCCFIT_ROUTER_URL 时默认走外部服务"
+    return "只有内置引擎；Key 来自主窗口；无 filter agent 输入"
 
 
 def main():
@@ -182,8 +161,7 @@ def main():
     check("越界诊断报错", case_scope_error)
     check("后台线程：内置引擎", case_worker_builtin)
     check("后台线程：外部 HTTP", case_worker_http)
-    check("对话框默认内置", case_dialog)
-    check("环境变量可切外部", case_env_defaults_to_http)
+    check("对话框只有内置引擎", case_dialog)
     ok = sum(1 for r in RESULTS if r)
     print("\n%d/%d 通过" % (ok, len(RESULTS)))
     return 0 if ok == len(RESULTS) else 1

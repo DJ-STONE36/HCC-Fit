@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""方案 A：可选 PubMed 候选检索。内置引擎，一键检索；不改 S1，不下载全文。"""
+"""方案 A：可选 PubMed 候选检索。
+
+只提供**内置引擎**（进程内调用 hccfit），不需要启动外部服务、不填 Key/filter agent：
+- SciencePal Key 由主窗口“1 · 大脑 / SciencePal 连接”统一提供；
+- filter agent 由环境变量 `SCIENCEPAL_FILTER_AGENT_ID` 配置；
+- 外部 HTTP 服务代码（router/ + RouterClient）保留，但不在界面暴露。
+"""
 from __future__ import annotations
 
 import os
@@ -8,89 +14,56 @@ import time
 from PySide6.QtCore import Qt, QThread, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTextBrowser,
-    QVBoxLayout, QWidget,
+    QApplication, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
+    QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
+    QTextBrowser, QVBoxLayout,
 )
 
 from app import paths
-from app.router_client import ENGINES, RouterWorker
+from app.keycheck import check_key
+from app.router_client import RouterWorker
 
 
 class RouterDialog(QDialog):
-    def __init__(self, scenario: dict, parent=None):
+    def __init__(self, scenario: dict, sciencepal_key: str = "", parent=None):
         super().__init__(parent)
         self.scenario = scenario
+        self.sciencepal_key = (sciencepal_key or "").strip()
         self.thread = None
         self.worker = None
         self.candidate_path = None
         self.papers = []
 
         self.setWindowTitle("先找候选论文（PubMed）")
-        self.resize(1040, 700)
+        self.resize(1040, 680)
         lay = QVBoxLayout(self)
 
-        # ---- 运行方式：默认内置，一键检索，不需要单独启动服务 ----
-        lay.addWidget(QLabel("检索方式"))
-        top = QHBoxLayout()
-        self.engine = QComboBox()
-        for label, value in ENGINES:
-            self.engine.addItem(label, value)
-        # 老用户如果显式设了 HCCFIT_ROUTER_URL，默认走外部服务
-        if os.environ.get("HCCFIT_ROUTER_URL"):
-            idx = self.engine.findData("http")
-            if idx >= 0:
-                self.engine.setCurrentIndex(idx)
-        self.engine.currentIndexChanged.connect(self._refresh_engine)
-        top.addWidget(self.engine)
-
-        self.external_row = QWidget()
-        ext = QHBoxLayout(self.external_row)
-        ext.setContentsMargins(0, 0, 0, 0)
-        self.url = QLineEdit(os.environ.get("HCCFIT_ROUTER_URL", "http://127.0.0.1:8080"))
-        # 不再在界面里要 Router token：默认服务端不鉴权（HCCFIT_ROUTER_TOKEN 留空）；
-        # 只有远程部署才需要，用环境变量配置，不打扰普通用户。
-        self.token = os.environ.get("HCCFIT_ROUTER_TOKEN", "").strip()
-        ext.addWidget(QLabel("地址"))
-        ext.addWidget(self.url, 3)
-        top.addWidget(self.external_row, 1)
-        lay.addLayout(top)
+        lay.addWidget(QLabel("检索方式：内置引擎（进程内，无需启动服务）"))
 
         self.engine_msg = QLabel("")
         self.engine_msg.setWordWrap(True)
         self.engine_msg.setStyleSheet("color:#66727f;font-size:9pt;")
         lay.addWidget(self.engine_msg)
 
-        # ---- 检索参数：一键即可，Key 只放内存 ----
         row = QHBoxLayout()
-        self.sp_key = QLineEdit()
-        self.sp_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.sp_key.setPlaceholderText("SciencePal Key（仅 balanced；只放内存）")
-        self.filter_agent = QLineEdit()
-        self.filter_agent.setPlaceholderText("filter agent ID（仅 balanced，可选）")
         self.strategy = QComboBox()
         self.strategy.addItem("fast（5–10 秒）", "fast")
         self.strategy.addItem("balanced（60–90 秒）", "balanced")
+        self.strategy.currentIndexChanged.connect(self._refresh_status)
         self.k = QSpinBox()
         self.k.setRange(1, 8)
         self.k.setValue(8)
         self.search_btn = QPushButton("一键检索候选")
         self.search_btn.clicked.connect(self.search)
-        self.fallback_btn = QPushButton("改用内置引擎重试")
-        self.fallback_btn.setVisible(False)
-        self.fallback_btn.clicked.connect(self._retry_builtin)
-        row.addWidget(self.sp_key, 2)
-        row.addWidget(self.filter_agent, 2)
+        row.addWidget(QLabel("策略"))
         row.addWidget(self.strategy)
         row.addWidget(QLabel("k"))
         row.addWidget(self.k)
+        row.addStretch(1)
         row.addWidget(self.search_btn)
-        row.addWidget(self.fallback_btn)
         lay.addLayout(row)
 
-        self.status = QLabel("只做候选发现；题录/摘要不是全文，S2 四维核查仍需 PDF。"
-                             " balanced 需要 SciencePal Key（可填上方或配在环境变量），"
-                             "以及 filter agent ID。")
+        self.status = QLabel("只做候选发现；题录/摘要不是全文，S2 四维核查仍需 PDF。")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color:#8a5a00;background:#fff5e0;border:1px solid #f0dcb0;"
                                   "border-radius:6px;padding:6px;")
@@ -126,21 +99,13 @@ class RouterDialog(QDialog):
         bar.addWidget(self.add_btn)
         lay.addLayout(bar)
 
-        self._refresh_engine()
+        self._refresh_status()
 
-    # ---------------- 运行方式 ----------------
-    def current_engine(self) -> str:
-        return self.engine.currentData() or "builtin"
+    # ---------------- 状态 ----------------
+    def current_strategy(self) -> str:
+        return self.strategy.currentData() or "fast"
 
-    def _refresh_engine(self):
-        builtin = self.current_engine() == "builtin"
-        self.external_row.setVisible(not builtin)
-        if not builtin:
-            self.engine_msg.setText("外部服务：需先启动 HCC-Fit_Simple_Router；"
-                                    "不想启动服务就选“内置引擎”。"
-                                    "（服务端默认不鉴权；仅远程部署时用 HCCFIT_ROUTER_TOKEN）")
-            self.search_btn.setEnabled(True)
-            return
+    def _refresh_status(self):
         from app.router_engine import engine_status
         st = engine_status()
         if not st["available"]:
@@ -148,33 +113,32 @@ class RouterDialog(QDialog):
             self.search_btn.setEnabled(False)
             return
         self.search_btn.setEnabled(True)
-        if st.get("source") == "bundled":
-            where = "（打包内置）"
-        else:
-            where = "（%s）" % st["path"] if st.get("path") else ""
+        level, _msg = check_key(self.sciencepal_key)
+        key_text = {"ok": "已配置", "warn": "疑似不完整", "error": "未配置/格式异常"}[level]
+        if os.environ.get("SCIENCEPAL_API_KEY") and level == "error":
+            key_text = "已由环境变量配置"
+        filter_text = "已配置" if st.get("filter_configured") else "未配置（balanced 会降级为 fast）"
         self.engine_msg.setText(
-            "内置引擎可用%s · 策略 %s · SciencePal Key %s · filter agent %s"
-            % (where, "/".join(st.get("strategies") or []),
-               "已配置" if st.get("sciencepal_configured") else "未配置（balanced 请在上方填写）",
-               "已配置" if st.get("filter_configured") else "未配置（balanced 会降级为 fast）"))
+            "内置引擎可用 · 策略 %s · SciencePal Key %s · filter agent %s"
+            % ("/".join(st.get("strategies") or []), key_text, filter_text))
 
     # ---------------- 检索 ----------------
     def search(self):
         if self.thread is not None:
             return
-        engine = self.current_engine()
-        if engine == "http" and not self.url.text().strip():
-            QMessageBox.warning(self, "缺少地址", "外部服务模式需要填写 Router 地址。")
-            return
-        self.fallback_btn.setVisible(False)
+        strategy = self.current_strategy()
+        if strategy == "balanced":
+            level, msg = check_key(self.sciencepal_key)
+            if level == "error" and not os.environ.get("SCIENCEPAL_API_KEY"):
+                QMessageBox.warning(self, "缺少 SciencePal Key",
+                                    msg + "\n\nfast 不需要 Key；balanced 必须在“1 · 大脑”里填 Key。")
+                return
         self.search_btn.setEnabled(False)
-        self.status.setText("检索中…（%s）" % ("内置引擎，无需服务" if engine == "builtin" else "外部服务"))
+        self.status.setText("检索中…（内置引擎，无需服务）")
         self.thread = QThread(self)
         self.worker = RouterWorker(
-            self.scenario, self.strategy.currentData(), self.k.value(),
-            self.sp_key.text().strip(), engine=engine,
-            base_url=self.url.text().strip(), token=self.token,
-            filter_agent_id=self.filter_agent.text().strip(),
+            self.scenario, strategy, self.k.value(), self.sciencepal_key,
+            engine="builtin",
         )
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
@@ -184,14 +148,6 @@ class RouterDialog(QDialog):
         self.worker.failed.connect(self.thread.quit)
         self.thread.finished.connect(self._thread_done)
         self.thread.start()
-
-    def _retry_builtin(self):
-        """外部服务连不上时，一键切回内置引擎并立即重试。"""
-        idx = self.engine.findData("builtin")
-        if idx >= 0:
-            self.engine.setCurrentIndex(idx)      # 会触发 _refresh_engine
-        self.fallback_btn.setVisible(False)
-        self.search()
 
     def _thread_done(self):
         if self.thread is not None:
@@ -229,9 +185,8 @@ class RouterDialog(QDialog):
         degraded = (data.get("meta") or {}).get("degraded")
         self.warn.setPlainText("\n".join(warnings) or ("已降级：SciencePal 不可用" if degraded else "无警告"))
         used = data.get("strategy_used") or ""
-        self.status.setText("返回 %d 篇，实际策略：%s（%s）；勾选后保存，再回论文区添加 PDF。"
-                            % (len(self.papers), used or "—",
-                               "内置引擎" if self.current_engine() == "builtin" else "外部服务"))
+        self.status.setText("返回 %d 篇，实际策略：%s；勾选后保存，再回论文区添加 PDF。"
+                            % (len(self.papers), used or "—"))
         self.add_btn.setEnabled(bool(self.papers))
         if not self.papers:
             self.status.setText("没有找到候选；可改用 fast、放宽条件，或直接在论文区添加 PDF。")
@@ -240,17 +195,6 @@ class RouterDialog(QDialog):
         self.search_btn.setEnabled(True)
         self.status.setText("检索失败：%s" % msg)
         self.warn.setPlainText(msg)
-        # 外部服务连不上（10061/拒绝连接）：给一个“一键切内置”的出口
-        if self.current_engine() == "http" and msg.startswith("连不上"):
-            try:
-                from app.router_engine import engine_status
-                st = engine_status()
-            except Exception:
-                st = {"available": False}
-            self.fallback_btn.setVisible(bool(st.get("available")))
-            if st.get("available"):
-                self.status.setText("外部 Router 没启动（%s）。可点“改用内置引擎重试”，"
-                                    "或先启动 Router 服务。" % self.url.text().strip())
 
     # ---------------- 候选操作 ----------------
     def _row_paper(self):
@@ -323,5 +267,4 @@ class RouterDialog(QDialog):
             QMessageBox.information(self, "正在检索", "检索还没结束，请稍等。")
             event.ignore()
             return
-        self.sp_key.clear()
         event.accept()

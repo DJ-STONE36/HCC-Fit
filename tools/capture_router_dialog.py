@@ -13,7 +13,6 @@ sys.path.insert(0, str(ROOT / "desktop"))
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from app import router_engine  # noqa: E402
 from app.router_dialog import RouterDialog  # noqa: E402
 
 SCENARIO = {
@@ -28,9 +27,7 @@ SCENARIO = {
 
 def main():
     app = QApplication([])
-    router_engine.ensure_engine()
-    router_engine._PATH = None     # 截图按“打包内置”展示，不暴露开发机路径
-    dlg = RouterDialog(SCENARIO)
+    dlg = RouterDialog(SCENARIO, "sp_live_demo_abcdefghijklmnop")
     dlg.resize(1040, 700)
     dlg.show()
     app.processEvents()

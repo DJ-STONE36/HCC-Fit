@@ -116,6 +116,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._load_settings()
         self._on_mode_changed()
+        self._check_key()
 
     # ---------------- UI ----------------
     def _build_ui(self):
@@ -156,7 +157,7 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(body)
         lay.setContentsMargins(2, 2, 8, 2)
 
-        scene = QGroupBox("1 · 场景")
+        scene = QGroupBox("2 · 场景")
         sv = QVBoxLayout(scene)
         sv.addWidget(QLabel("请描述患者情况和你想回答的问题（一段话即可）"))
         ex_row = QHBoxLayout()
@@ -202,7 +203,7 @@ class MainWindow(QMainWindow):
         self.missing = QLineEdit(scene)
         self.missing.hide()
 
-        files = QGroupBox("2 · 论文")
+        files = QGroupBox("3 · 论文")
         fv = QVBoxLayout(files)
         fv.addWidget(QLabel("论文关键段落（可选，但很建议）"))
         self.paper_text = QTextEdit()
@@ -231,7 +232,7 @@ class MainWindow(QMainWindow):
         rh.addStretch(1)
         fv.addLayout(rh)
 
-        brain = QGroupBox("3 · 大脑")
+        brain = QGroupBox("1 · 大脑 / SciencePal 连接")
         bv = QVBoxLayout(brain)
         self.mode = QComboBox()
         for label, value in MODES:
@@ -242,6 +243,11 @@ class MainWindow(QMainWindow):
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.setPlaceholderText("SciencePal API Key（只放内存，不写盘）")
         bv.addWidget(self.key)
+        self.key_warn = QLabel("")
+        self.key_warn.setWordWrap(True)
+        self.key_warn.setStyleSheet("color:#c0392b;font-size:9pt;")
+        bv.addWidget(self.key_warn)
+        self.key.textChanged.connect(self._check_key)
         self.base = QLineEdit("https://sciencepal.ai")
         self.agent = QLineEdit("HCC-Fit")
         bv.addWidget(QLabel("Base"))
@@ -267,9 +273,9 @@ class MainWindow(QMainWindow):
         foot.setWordWrap(True)
         foot.setStyleSheet("color:#8a97a6;font-size:9pt;")
 
+        lay.addWidget(brain)
         lay.addWidget(scene)
         lay.addWidget(files)
-        lay.addWidget(brain)
         lay.addStretch(1)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
@@ -495,7 +501,7 @@ class MainWindow(QMainWindow):
         except RouterError as exc:
             QMessageBox.warning(self, "Router 不适用", str(exc))
             return
-        dlg = RouterDialog(scenario, self)
+        dlg = RouterDialog(scenario, self.key.text().strip(), self)
         if dlg.exec() and dlg.candidate_path:
             self.add_files([dlg.candidate_path])
             self.file_info.setText(
@@ -587,8 +593,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "缺少输入", "场景卡里缺少患者摘要或问题，请重新整理。")
             return
         mode = self.current_mode()
-        if mode in ("sciencepal", "sciencepal_hcc") and not self.key.text().strip():
-            QMessageBox.warning(self, "缺少 Key", "选择 SciencePal 模式需要填 API Key。")
+        level, key_msg = self._check_key()
+        if mode in ("sciencepal", "sciencepal_hcc") and level == "error":
+            QMessageBox.warning(self, "SciencePal Key 有问题",
+                                key_msg + "\n\n请在上方“1 · 大脑 / SciencePal 连接”里填写或重新复制。")
             return
         if mode == "sciencepal_hcc" and not self.files and not scenario["paper_text"]:
             QMessageBox.warning(self, "缺少论文", "HCC-Fit 单次核查需要上传 PDF 或粘贴正文。")
@@ -1021,6 +1029,19 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.workspace)))
 
     # ---------------- 测试连接 ----------------
+    def _check_key(self, *_args):
+        """SciencePal Key 的前置检查：空/非 ASCII/空格 → 红色警告；偏短/前缀可疑 → 黄色。"""
+        from app.keycheck import check_key
+        try:
+            level, msg = check_key(self.key.text())
+        except AttributeError:
+            return "ok", ""
+        colors = {"ok": "#1e8449", "warn": "#8a5a00", "error": "#c0392b"}
+        self.key_warn.setStyleSheet("color:%s;font-size:9pt;" % colors[level])
+        self.key_warn.setText("" if level == "ok" else msg)
+        self.key_warn.setVisible(level != "ok")
+        return level, msg
+
     def probe(self):
         if self.probe_thread is not None:
             return

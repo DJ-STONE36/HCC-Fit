@@ -140,6 +140,51 @@ POST /api/thread/{thread_id}/agent/start
 
 **一句话**：fast = 规则检索 + 规则筛选；balanced = 同一批候选再用 Agent 做一次“医生式”筛选。balanced 不改变召回，只改变“哪些论文算数”。
 
+### 3.1 提示词层面：fast 没有提示词，balanced 恰好一条
+
+**fast：0 条提示词。** 从查询生成到排序全部是确定性代码：
+`build_plan()` 拼 Boolean → `search_hybrid()` 检索/RRF → `filter_papers()`（规则）→ `score_all()` → `rank()`。
+同样的输入，跑多少次结果都一样（PubMed 索引变化除外），可以拿日志逐条复核。
+
+**balanced：1 条提示词**，位于 `router/hccfit/sciencepal.py` 的 `filter_papers()`，调用时连同“场景原话 + 候选列表”发给配置的 filter agent：
+
+```text
+你是 HCC 预测模型检索的医生式监督器。场景：
+{scenario.text}
+
+候选：
+[{"pmid":"...","title":"...","year":2021,"journal":"...","abstract":"前 700 字","why":"...","risk":"..."}, ...]
+
+按医生流程：真实预测/预后模型？结局、时间零点、人群/治疗是否匹配？
+fit 0-2；不匹配 drop；冲突保留 fit=1 标注；不要因标题有 nomogram 就保留。
+只输出严格 JSON：
+{"keep":[{"pmid":"","fit":0,"reason":""}],"drop":[{"pmid":"","reason":""}]}
+```
+
+逐句含义：
+
+| 提示词片段 | 作用 | 为什么这么写 |
+|---|---|---|
+| “医生式监督器” | 给模型角色定位 | 要的是“像医生读摘要那样判断”，不是摘要改写 |
+| “场景：{text}” | 患者侧约束 | 结局/时点/治疗必须和场景对齐，避免只看标题 |
+| “候选：…” | 只喂题录+摘要前 700 字 + 算法给的 why/risk | 控制 token；不让它抓全文（S2 才读全文） |
+| “真实预测/预后模型？” | 排除纯综述、纯机制、诊断模型 | 标题里有 nomogram 不等于可用 |
+| “结局、时间零点、人群/治疗是否匹配？” | 四个匹配维度 | 与 S2 四维一致，提前在筛选阶段挡掉明显不匹配 |
+| “fit 0-2；不匹配 drop；冲突保留 fit=1 标注” | 给可执行标尺 | fit=0 直接丢；fit=1 保留但标注“有冲突”，交给人工 |
+| “不要因标题有 nomogram 就保留” | 反向抑制词面偏置 | 这是实测最容易出现的误召回 |
+| “只输出严格 JSON…keep/drop” | 保证可解析 | 解析失败会被判为 `degraded` 并回退算法结果 |
+
+执行与解析：
+
+1. `run_agent()`：initiate（`agent_id`=filter agent、`stream=true`）→ 读 SSE → 确认终态；
+2. `_parse()` 从回答里抠出 JSON；`strategies._pick()` 只保留 `fit>=1` 且 `pmid` 在候选池里的，
+   再按 `fit` 取前 k；
+3. 解析失败 / 超时 / 429 / asked → `degraded=true` + warning + 回退算法 top-k（**不会**补造论文）。
+
+> 也就是说：**改“召回”不用碰提示词（改 `core.py` 的查询模板）；改“哪些论文算数”才动这条提示词**
+> （或换一个 filter agent / 平台侧 Agent 配置）。
+
+
 ---
 
 ## 4. 五阶段流程（SciencePal Agent 模式）

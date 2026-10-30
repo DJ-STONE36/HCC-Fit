@@ -24,8 +24,8 @@
 | 四维 / 证据 / 引文 / 注意点 / 原始返回 | ✅ |
 | PDF / JSON 导出 | ✅ |
 | 报告后补充资料 | ✅ 已改为“所需资料只读文本框 + 每条资料一条输入框”；全量重跑；新旧报告切换 |
-| Router 候选论文 | ✅ **已内置**：进程内调用 `hccfit.strategies.run`，一键检索，无需单独起服务 |
-| Router 弹窗填 SciencePal Key / filter agent | ✅ 已加；仅 balanced 用，关闭清空 |
+| Router 候选论文 | ✅ **已内置且是界面唯一入口**：进程内调用 `hccfit.strategies.run`，一键检索；外部 HTTP 代码保留但不显示 |
+| SciencePal Key / filter agent | ✅ Key 只在“1 · 大脑”一处（带格式警告）；filter agent 只认环境变量，界面不再询问 |
 | Windows one-dir 构建 | ✅ `dist/HCC-Fit`（2026-10-30 已重建，含内置 Router 与 requests） |
 | macOS | ❌ 只有方案，未实施 |
 
@@ -226,7 +226,7 @@ curl http://127.0.0.1:8080/healthz
 - 默认**进程内直连**：不用起 uvicorn、不占 8080、不需要 `HCCFIT_ROUTER_URL`；
 - 打包时 `router/hccfit` 作为数据进入 `_internal/router`，`app/router_engine.py` 依次找
   `HCCFIT_ROUTER_DIR` → `_MEIPASS/router` → `desktop/../router` → `cwd/router`；
-- 仍保留外部 HTTP 模式（对话框切换或设 `HCCFIT_ROUTER_URL`），供多端/远程部署；
+- 外部 HTTP 服务（`router/` + `RouterClient`）作为核心代码保留，但**界面不再暴露**（无“检索方式/地址/token”入口），供多端/远程/命令行使用；
 - `router/` 仍是同一份源码：桌面只是**导入**它，没有复制第二份。
 
 **不是 Router 替换 S1**；候选只是题录/摘要，S2 仍需 PDF/正文。
@@ -305,8 +305,8 @@ curl http://127.0.0.1:8080/healthz
 ### Router 形态（已决定）
 
 - 默认：**进程内直连**（单 exe、无 8080、双击即用），这是当前实现；
-- 需要 Web/多端共用或 Router 独立升级时：切“外部 Router 服务（HTTP）”。
-  **服务端默认不鉴权**（`HCCFIT_ROUTER_TOKEN` 留空）；界面已不再要求填 token，只有远程部署才用环境变量设置。
+- 外部 HTTP 服务仍保留在核心代码里（`router/` + `RouterClient`），但界面只提供内置引擎；
+  多端/远程部署时用 `curl` 或 `RouterClient` 直连。服务端默认不鉴权（`HCCFIT_ROUTER_TOKEN` 留空）。
 
 ---
 
@@ -347,6 +347,8 @@ curl http://127.0.0.1:8080/healthz
 | **SciencePal 调用修正** | Router 改为 initiate(stream=true) → 立即读流(after_index=0) → 确认终态，修掉“轮询完再读流拿空答案 → balanced 静默降级”；支持 asked/failed/stopped；模型默认留空；补 `agent_select_type=manual` 与 401/403/404/422/429 中文提示 |
 | **桌面端** | `_poll` 识别 `asked`（明确报错，不再空等）；新增 `_http_hint`；initiate 补 `agent_select_type` |
 | **Router token** | 界面不再要求填 token；服务端默认不鉴权（留空），仅远程部署用 `HCCFIT_ROUTER_TOKEN` |
+| **界面收敛** | 去掉“检索方式/外部地址/token/filter agent”输入，只保留内置引擎；Key 与“大脑”合并为左侧最上方“1 · 大脑 / SciencePal 连接”（场景之上）；Key 空/非 ASCII/空格实时红字警告，启动与 balanced 会拦截 |
+| **fast vs balanced 文档** | 接入说明新增 3.1：fast 0 条提示词（全规则），balanced 1 条提示词（逐句解释 + 解析/降级路径） |
 | **接入文档** | 新增 `docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`（官方 8 条规则、fast vs balanced、五阶段、错误码、本次修复） |
 | **测试** | Router 新增 `test_agent_client.py`（8 项，全离线）→ 19 项；桌面新增 `test_sciencepal_client.py`（4 项）→ 9 个脚本 |
 
