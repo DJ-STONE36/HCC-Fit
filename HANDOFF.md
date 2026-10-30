@@ -355,6 +355,7 @@ curl http://127.0.0.1:8080/healthz
 | **真 Key 端到端验证（2026-10-30）** | Key 有效（51 位）；账号 6 个可用 Agent，指定的 `61033129-…-280a` 为自定义「HCC-Fit」且在列表中；`/billing/available-models` 5 个模型；balanced 实测 completed（36–41s，含真实 keep/drop）；发现 fit 尺度歧义（理由写“匹配”却给 fit=0 → 全丢）→ 提示词固定 0/1/2 含义后同一 Agent 稳定给 fit=2；keep 全空时回退算法 top-k 并置 degraded |
 | **内置 Agent** | 桌面 `DEFAULT_AGENT_ID` 与 Router `DEFAULT_FILTER_AGENT_ID` 均指向实测可用的 `HCC-Fit`；界面去掉 Base/Agent 输入，只留 Key；`SCIENCEPAL_AGENT_ID` / `SCIENCEPAL_FILTER_AGENT_ID` 可覆盖，设空则回退查找/自动路由；Key 无权使用内置 Agent（403/404）时自动退回按名称/平台路由 |
 | **逐篇发送 + 文案** | 标题去“大脑”；测试连接成功只显示“能连上”；新增复选框“多篇论文时逐篇发给 Agent”：五阶段逐篇 S2、单次核查逐篇出报告后合并 papers/matched/期望数据（默认一次带全部）；新增 test_split_papers 4 项 |
+| **逐篇进度行** | 流程面板支持动态子行：逐篇事件用 `match#i` / `hcc#i`，插在父行之后，各自显示“运行中/完成 · tier · 耗时”；每次启动前重建流程行，避免上次残留；新增 3 项测试 |
 | **接入文档** | 新增 `docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`（官方 8 条规则、fast vs balanced、五阶段、错误码、本次修复） |
 | **测试** | Router 新增 `test_agent_client.py`（8 项，全离线）→ 19 项；桌面新增 `test_sciencepal_client.py`（4 项）→ 9 个脚本 |
 

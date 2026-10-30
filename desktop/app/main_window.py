@@ -637,6 +637,7 @@ class MainWindow(QMainWindow):
         self._launch_worker(mode, scenario, names, ws)
 
     def _launch_worker(self, mode, scenario, names, ws):
+        self._rebuild_stages()               # 清掉上一次运行的逐篇行
         opts = {
             "api_key": self.key.text().strip(),
             "timeout": 240 if mode == "sciencepal_hcc" else 180,
@@ -821,37 +822,56 @@ class MainWindow(QMainWindow):
         self._validate_supplement()
         self._launch_worker(mode, scenario, names, ws)
 
+    def _ensure_stage_row(self, key: str, label: str | None = None):
+        """找到 stage 行；逐篇事件（如 match#0 / hcc#0）按父行之后插入。"""
+        for i in range(self.stage_list.count()):
+            item = self.stage_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == key:
+                return item
+        text = "%s　·　待开始" % (label or key)
+        item = QListWidgetItem(text)
+        item.setData(Qt.ItemDataRole.UserRole, key)
+        item.setData(Qt.ItemDataRole.UserRole + 1, label or key)
+        insert_at = -1
+        if "#" in key:
+            parent = key.split("#")[0]
+            for i in range(self.stage_list.count()):
+                k = str(self.stage_list.item(i).data(Qt.ItemDataRole.UserRole) or "")
+                if k == parent or k.startswith(parent + "#"):
+                    insert_at = i + 1
+        if insert_at >= 0:
+            self.stage_list.insertItem(insert_at, item)
+        else:
+            self.stage_list.addItem(item)
+        return item
+
     def _on_stage(self, ev: dict):
         key = ev.get("stage")
         if not key:
             return
-        for i in range(self.stage_list.count()):
-            item = self.stage_list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) != key:
-                continue
-            label = item.data(Qt.ItemDataRole.UserRole + 1) or key
-            status = ev.get("status")
-            if status == "start":
-                item.setText("%s　·　运行中…" % label)
-                item.setForeground(QBrush(QColor("#17457f")))
-            elif status == "ok":
-                extra = []
-                if ev.get("ms"):
-                    extra.append("%dms" % ev["ms"])
-                if ev.get("detail"):
-                    extra.append(str(ev["detail"]))
-                item.setText("%s　·　完成%s" % (label, ("　·　" + "　".join(extra)) if extra else ""))
-                item.setForeground(QBrush(QColor("#1e8449")))
-            elif status == "error":
-                item.setText("%s　·　失败：%s" % (label, ev.get("detail") or ""))
-                item.setForeground(QBrush(QColor("#c0392b")))
-            elif status == "degraded":
-                item.setText("%s　·　降级：%s" % (label, ev.get("detail") or ""))
-                item.setForeground(QBrush(QColor("#b9770e")))
-            elif status == "pending":
-                item.setText("%s　·　等待人工：%s" % (label, ev.get("detail") or ""))
-                item.setForeground(QBrush(QColor("#b9770e")))
-            break
+        item = self._ensure_stage_row(key, ev.get("label"))
+        label = item.data(Qt.ItemDataRole.UserRole + 1) or key
+        status = ev.get("status")
+        if status == "start":
+            item.setText("%s　·　运行中…" % label)
+            item.setForeground(QBrush(QColor("#17457f")))
+        elif status == "ok":
+            extra = []
+            if ev.get("ms"):
+                extra.append("%dms" % ev["ms"])
+            if ev.get("detail"):
+                extra.append(str(ev["detail"]))
+            item.setText("%s　·　完成%s" % (label, ("　·　" + "　".join(extra)) if extra else ""))
+            item.setForeground(QBrush(QColor("#1e8449")))
+        elif status == "error":
+            item.setText("%s　·　失败：%s" % (label, ev.get("detail") or ""))
+            item.setForeground(QBrush(QColor("#c0392b")))
+        elif status == "degraded":
+            item.setText("%s　·　降级：%s" % (label, ev.get("detail") or ""))
+            item.setForeground(QBrush(QColor("#b9770e")))
+        elif status == "pending":
+            item.setText("%s　·　等待人工：%s" % (label, ev.get("detail") or ""))
+            item.setForeground(QBrush(QColor("#b9770e")))
 
     def _on_done(self, visit: dict):
         self.timer.stop()

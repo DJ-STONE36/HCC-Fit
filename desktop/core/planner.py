@@ -65,20 +65,22 @@ class Planner:
         self.degraded_note = False
 
     # ---------- helpers ----------
-    def _stage(self, key, payload):
+    def _stage(self, key, payload, label=None, emit_key=None):
+        emit_key = emit_key or key
+        label = label or STAGE_LABEL.get(key, key)
         t0 = time.time()
-        self.emit({"stage": key, "label": STAGE_LABEL[key], "status": "start"})
+        self.emit({"stage": emit_key, "label": label, "status": "start"})
         try:
             out = self.brain.run_stage(key, payload)
         except Pending as exc:
-            self.emit({"stage": key, "label": STAGE_LABEL[key], "status": "pending", "detail": str(exc)})
+            self.emit({"stage": emit_key, "label": label, "status": "pending", "detail": str(exc)})
             raise
         except BrainError as exc:
-            self.emit({"stage": key, "label": STAGE_LABEL[key], "status": "error", "detail": str(exc)})
+            self.emit({"stage": emit_key, "label": label, "status": "error", "detail": str(exc)})
             raise
         if getattr(self.brain, "degraded_files", False) and not self.degraded_note:
             self.degraded_note = True
-            self.emit({"stage": key, "label": STAGE_LABEL[key], "status": "degraded",
+            self.emit({"stage": emit_key, "label": label, "status": "degraded",
                        "detail": "平台未能解析附件，已改用抽出的文字"})
         raw = getattr(self.brain, "last_text", None)
         if raw:
@@ -86,18 +88,20 @@ class Planner:
             self.brain.last_text = None
         ms = int((time.time() - t0) * 1000)
         self.timing[key] = self.timing.get(key, 0) + ms
-        out = self._degrade(key, out)
-        self.emit({"stage": key, "label": STAGE_LABEL[key], "status": "ok", "ms": ms,
+        out = self._degrade(key, out, emit_key=emit_key, label=label)
+        self.emit({"stage": emit_key, "label": label, "status": "ok", "ms": ms,
                    "detail": self._brief(key, out)})
         return out
 
-    def _degrade(self, key, out):
+    def _degrade(self, key, out, emit_key=None, label=None):
         """大脑没按 JSON 返回时，降级成"能继续跑"的结构，而不是让整条链路失败。"""
+        emit_key = emit_key or key
+        label = label or STAGE_LABEL.get(key, key)
         if not (isinstance(out, dict) and out.get("_parse") == "text"):
             return out
         text = (out.get("_text") or "").strip()
         self.text_fallbacks.append({"stage": key, "text": text[:1200]})
-        self.emit({"stage": key, "label": STAGE_LABEL[key], "status": "degraded",
+        self.emit({"stage": emit_key, "label": label, "status": "degraded",
                    "detail": "Agent 未按 JSON 返回，已降级为原文摘要"})
         if key == "domain":
             status = "unclear"
@@ -161,7 +165,8 @@ class Planner:
                 payload = dict(base, included=[one], papers=[one],
                                files=([fname] if fname else self.files),
                                batch="%d/%d" % (i + 1, len(included)))
-                out = self._stage("match", payload)
+                label = "S2 逐篇匹配 · %d/%d %s" % (i + 1, len(included), fname or "")
+                out = self._stage("match", payload, label=label, emit_key="match#%d" % i)
                 matched.extend(out.get("matched") or [])
         else:
             matched_out = self._stage("match", dict(base, included=included, papers=papers))
@@ -326,9 +331,21 @@ class HccPlanner:
         if self.split_papers and len(self.files) > 1:
             visits = []
             for i, name in enumerate(self.files):
-                self.emit({"stage": "hcc", "label": self.LABEL, "status": "progress",
-                           "detail": "逐篇 %d/%d：%s" % (i + 1, len(self.files), name)})
-                visits.append(self._run_one([name]))
+                key = "hcc#%d" % i
+                label = "单次核查 · %d/%d %s" % (i + 1, len(self.files), name)
+                self.emit({"stage": key, "label": label, "status": "start"})
+                t_one = time.time()
+                try:
+                    one_visit = self._run_one([name])
+                except Exception as exc:  # noqa: BLE001
+                    self.emit({"stage": key, "label": label, "status": "error",
+                               "detail": str(exc)[:300]})
+                    raise
+                visits.append(one_visit)
+                matched_one = one_visit.get("matched") or []
+                self.emit({"stage": key, "label": label, "status": "ok",
+                           "ms": int((time.time() - t_one) * 1000),
+                           "detail": ("tier=%s" % matched_one[0]["tier"]) if matched_one else "原文降级"})
             visit = _merge_hcc_visits(visits)
             self._save(visit)
             matched = visit.get("matched") or []
