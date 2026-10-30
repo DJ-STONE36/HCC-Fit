@@ -144,9 +144,13 @@ class RouterDialog(QDialog):
             self.search_btn.setEnabled(False)
             return
         self.search_btn.setEnabled(True)
+        if st.get("source") == "bundled":
+            where = "（打包内置）"
+        else:
+            where = "（%s）" % st["path"] if st.get("path") else ""
         self.engine_msg.setText(
-            "内置引擎可用（%s）· 策略 %s · SciencePal Key %s · filter agent %s"
-            % (st.get("path") or "?", "/".join(st.get("strategies") or []),
+            "内置引擎可用%s · 策略 %s · SciencePal Key %s · filter agent %s"
+            % (where, "/".join(st.get("strategies") or []),
                "已配置" if st.get("sciencepal_configured") else "未配置（balanced 请在上方填写）",
                "已配置" if st.get("filter_configured") else "未配置（balanced 会降级为 fast）"))
 

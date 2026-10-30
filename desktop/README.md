@@ -114,6 +114,8 @@ set HCCFIT_ROUTER_URL=http://127.0.0.1:8080
 
 开发态内置引擎默认找包内同级 `router/`；也可用 `HCCFIT_ROUTER_DIR` 指向别处。
 
+![候选论文（内置 Router，一键检索）](docs/router_dialog.png)
+
 测试：
 
 ```bash

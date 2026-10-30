@@ -115,7 +115,8 @@ def engine_status() -> dict:
     return {
         "available": True,
         "error": "",
-        "path": str(_PATH) if _PATH else "（打包内置）",
+        "source": "bundled" if _PATH is None else "source",
+        "path": str(_PATH) if _PATH else "",
         "strategies": list(config.ENABLED_STRATEGIES),
         "sciencepal_configured": bool(config.SCIENCEPAL_API_KEY),
         "filter_configured": bool(config.SCIENCEPAL_FILTER_AGENT_ID),
