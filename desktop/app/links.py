@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import os
+import re
 import subprocess
 import time
 import webbrowser
@@ -49,6 +50,18 @@ def default_browser_command() -> str:
     return ""
 
 
+def browser_exe() -> str:
+    """默认浏览器 exe 路径（直接传 URL，比 --single-argument 稳）。"""
+    cmd = default_browser_command()
+    if not cmd:
+        return ""
+    m = re.match(r'\s*"([^"]+)"', cmd)
+    if m:
+        return m.group(1)
+    m = re.match(r"\s*(\S+)", cmd)
+    return m.group(1) if m else ""
+
+
 def build_cmdline(command: str, url: str) -> str:
     """把命令模板里的 %1 换成带引号的 URL（模板本身已带引号则不重复加）。"""
     if '"%1"' in command:
@@ -59,6 +72,29 @@ def build_cmdline(command: str, url: str) -> str:
 
 
 EXIT_PREFIX = "浏览器进程启动后立即退出"
+
+
+def _window_is_edge(hwnd) -> bool:
+    """只认 msedge.exe 的窗口（WebView2/Electron 也用 Chrome_WidgetWin_1）。"""
+    try:
+        pid = ctypes.wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return False
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid.value)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = ctypes.wintypes.DWORD(1024)
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                return False
+            return buf.value.lower().endswith("msedge.exe")
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _browser_window_count() -> int:
@@ -76,7 +112,7 @@ def _browser_window_count() -> int:
                 return True
             buf = ctypes.create_unicode_buffer(256)
             user32.GetClassNameW(hwnd, buf, 256)
-            if buf.value in ("Chrome_WidgetWin_1", "MozillaWindowClass"):
+            if buf.value in ("Chrome_WidgetWin_1", "MozillaWindowClass") and _window_is_edge(hwnd):
                 count += 1
             return True
 
@@ -84,6 +120,37 @@ def _browser_window_count() -> int:
         return count
     except Exception:  # noqa: BLE001
         return -1
+
+
+def _focus_browser_window() -> bool:
+    """把浏览器窗口提到前台（最小化的先还原）。"""
+    if os.name != "nt":
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        hwnds = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+        def _cb(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, buf, 256)
+            if buf.value in ("Chrome_WidgetWin_1", "MozillaWindowClass") \
+                    and user32.GetWindowTextLengthW(hwnd) > 0 and _window_is_edge(hwnd):
+                hwnds.append(hwnd)
+            return True
+
+        user32.EnumWindows(_cb, 0)
+        if not hwnds:
+            return False
+        hwnd = hwnds[-1]
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)      # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _wait_browser_window(before: int, timeout: float = 3.0) -> bool:
@@ -112,24 +179,42 @@ def _launch_explorer(url: str) -> tuple[bool, str]:
 
 
 def _launch_default_browser(url: str) -> tuple[bool, str]:
-    """启动默认浏览器；等 1.2s 看它是否立刻退出（被安全软件/沙箱拦截时 exit≠0）。"""
-    cmd = default_browser_command()
-    if not cmd:
+    """直接启动默认浏览器 exe + URL（不依赖 URL 关联），看 2s 退出码。"""
+    exe = browser_exe()
+    if not exe:
         return False, "没读到默认浏览器"
     try:
-        proc = subprocess.Popen(build_cmdline(cmd, url), close_fds=True)
+        proc = subprocess.Popen([exe, url], close_fds=True)
     except Exception as exc:  # noqa: BLE001
-        return False, "default-browser: %s" % exc
+        return False, "browser: %s" % exc
     try:
-        code = proc.wait(timeout=1.2)
+        code = proc.wait(timeout=2.0)
     except subprocess.TimeoutExpired:
-        return True, "default-browser"       # 还活着：窗口已起来
+        return True, "browser"           # 还活着：窗口已起来
     if code == 0:
-        return True, "default-browser(handoff)"   # 交给已有浏览器实例后正常退出
+        return True, "browser(handoff)"  # 交给已有实例后正常退出
     return False, "%s（exit=%d）" % (EXIT_PREFIX, code)
 
 
+def _log_attempt(url: str, ok: bool, how: str) -> None:
+    try:
+        from app import paths  # 延迟导入，避免循环
+        d = paths.app_data_dir() / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "links.log", "a", encoding="utf-8") as fh:
+            fh.write("%s\t%s\t%s\t%s\n" % (
+                time.strftime("%Y-%m-%d %H:%M:%S"), "OK" if ok else "FAIL", how, url))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def open_external_url(url: str) -> tuple[bool, str]:
+    ok, how = _open_external_url(url)
+    _log_attempt(url, ok, how)
+    return ok, how
+
+
+def _open_external_url(url: str) -> tuple[bool, str]:
     """返回 (是否成功, 方式或失败原因)。失败时会把链接复制到剪贴板。"""
     url = (url or "").strip()
     if not url:
@@ -137,48 +222,34 @@ def open_external_url(url: str) -> tuple[bool, str]:
 
     errors: list[str] = []
 
-    # 0) 没有浏览器窗口时，先走官方 ShellExecute（用户环境最稳），并用窗口数验证
+    # 1) 直接启动默认浏览器 exe + URL（新窗口/新标签页都能走，不依赖 URL 关联）
+    ok, how = _launch_default_browser(url)
+    if ok:
+        _focus_browser_window()
+        return True, how
+    errors.append(how)
+
+    # 2) ShellExecute 兜底（URL 关联正常时最省事）
     before = _browser_window_count()
     try:
         os.startfile(url)  # type: ignore[attr-defined]
         if before > 0:
-            # 已有浏览器窗口：ShellExecute 会交给现有实例开新标签页，
-            # 不要再去 spawn msedge（并发时容易 exit=21）
+            _focus_browser_window()
             return True, "startfile(existing)"
-        if _wait_browser_window(before, 3.0):
+        if _wait_browser_window(before, 4.0):
+            _focus_browser_window()
             return True, "startfile"
         errors.append("startfile: 浏览器窗口未出现")
     except Exception as exc:  # noqa: BLE001
         errors.append("startfile: %s" % exc)
 
-    # 2) 真实默认浏览器（最可靠）
-    ok, how = _launch_default_browser(url)
-    if ok:
-        return True, how
-    errors.append(how)
-    if how.startswith(EXIT_PREFIX):
-        # 浏览器进程启动即被拦截：ShellExecute/Qt 用的是同一个处理器，不再假装成功
-        try:
-            QApplication.clipboard().setText(url)
-        except Exception:  # noqa: BLE001
-            pass
-        return False, how + "；可能被安全软件/运行环境限制，已复制链接，请手动粘贴到浏览器"
-
-    # 2) Windows ShellExecute
-    if os.name == "nt":
-        try:
-            os.startfile(url)  # type: ignore[attr-defined]
-            return True, "startfile"
-        except Exception as exc:  # noqa: BLE001
-            errors.append("startfile: %s" % exc)
-
-    # 2.5) explorer 走一遍 shell（极少数环境 ShellExecute 不生效）
+    # 3) explorer 走一遍 shell
     ok, how = _launch_explorer(url)
     if ok:
         return True, how
     errors.append(how)
 
-    # 3) Qt
+    # 4) Qt
     try:
         if QDesktopServices.openUrl(QUrl(url)):
             return True, "qt"
@@ -186,7 +257,7 @@ def open_external_url(url: str) -> tuple[bool, str]:
     except Exception as exc:  # noqa: BLE001
         errors.append("qt: %s" % exc)
 
-    # 4) webbrowser
+    # 5) webbrowser
     try:
         if webbrowser.open(url):
             return True, "webbrowser"
@@ -198,4 +269,7 @@ def open_external_url(url: str) -> tuple[bool, str]:
         QApplication.clipboard().setText(url)
     except Exception:  # noqa: BLE001
         pass
-    return False, "；".join(errors[-4:])
+    summary = "；".join(errors[-4:])
+    if errors and errors[0].startswith(EXIT_PREFIX) and EXIT_PREFIX not in summary:
+        summary = errors[0] + "；" + summary
+    return False, summary

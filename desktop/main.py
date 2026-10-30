@@ -129,7 +129,25 @@ def _router_smoke() -> int:
     return 0
 
 
+def _open_url(url: str) -> int:
+    """排错用：HCC-Fit.exe --open-url <URL>，结果写 logs/links.log。"""
+    from app import links
+    app = _make_app()
+    ok, how = links.open_external_url(url)
+    print("OPEN", "OK" if ok else "FAIL", how)
+    from PySide6.QtWidgets import QMessageBox
+    QMessageBox.information(
+        None, "打开链接测试",
+        "结果：%s\n方式/原因：%s\n\n链接：%s"
+        % ("成功" if ok else "失败", how, url))
+    return 0 if ok else 2
+
+
 def main():
+    if "--open-url" in sys.argv:
+        idx = sys.argv.index("--open-url")
+        url = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""
+        return _open_url(url)
     if "--smoke" in sys.argv:
         return _smoke()
     if "--router-smoke" in sys.argv:

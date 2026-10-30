@@ -298,6 +298,8 @@ def case_startfile_verified():
     import os
     from app import links
     orig_start, orig_count, orig_wait = os.startfile, links._browser_window_count, links._wait_browser_window
+    orig_launch = links._launch_default_browser
+    links._launch_default_browser = lambda u: (False, "browser: test")
     links._browser_window_count = lambda: 0
     links._wait_browser_window = lambda before, timeout=3.0: True
     os.startfile = lambda u: None
@@ -305,28 +307,30 @@ def case_startfile_verified():
         ok, how = links.open_external_url("https://example.test/x")
     finally:
         os.startfile = orig_start
+        links._launch_default_browser = orig_launch
         links._browser_window_count = orig_count
         links._wait_browser_window = orig_wait
     assert ok and how == "startfile", (ok, how)
     return "ShellExecute 后检测到浏览器窗口 → 成功"
 
 
-def case_startfile_existing():
-    import os
+def case_existing_window_handoff():
     from app import links
-    orig_start, orig_count, orig_direct = os.startfile, links._browser_window_count, links._launch_default_browser
+    orig_launch, orig_count = links._launch_default_browser, links._browser_window_count
+    orig_focus = links._focus_browser_window
+    focused = {"n": 0}
     links._browser_window_count = lambda: 1          # 已有浏览器窗口
-    os.startfile = lambda u: None
-    links._launch_default_browser = lambda u: (_ for _ in ()).throw(
-        AssertionError("已有窗口时不应再 spawn msedge"))
+    links._launch_default_browser = lambda u: (True, "browser(handoff)")
+    links._focus_browser_window = lambda: focused.__setitem__("n", focused["n"] + 1) or True
     try:
         ok, how = links.open_external_url("https://example.test/x")
     finally:
-        os.startfile = orig_start
+        links._launch_default_browser = orig_launch
         links._browser_window_count = orig_count
-        links._launch_default_browser = orig_direct
-    assert ok and how == "startfile(existing)", (ok, how)
-    return "已有浏览器时交给 ShellExecute，不再 spawn（避免 exit=21）"
+        links._focus_browser_window = orig_focus
+    assert ok and how == "browser(handoff)", (ok, how)
+    assert focused["n"] == 1, "应把已有浏览器窗口提到前台"
+    return "已有浏览器 → exe+URL 交给现有实例并提到前台"
 
 
 def case_open_external_fallback():
@@ -423,7 +427,7 @@ def main():
     check("打开链接多级兜底", case_open_external_fallback)
     check("浏览器秒退检测", case_browser_exit_detected)
     check("startfile 窗口验证", case_startfile_verified)
-    check("已有浏览器走 ShellExecute", case_startfile_existing)
+    check("已有浏览器 handoff", case_existing_window_handoff)
     check("默认浏览器命令行", case_build_cmdline)
     check("标题换行完整显示", case_titles_wrap)
     check("保存候选", case_save_candidates)
