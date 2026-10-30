@@ -7,6 +7,7 @@ desktop/smoke_data/
 desktop/tests/_tmp*/
 _smoke*/
 _iso/
+_secrets/
 __pycache__/
 *.py[cod]
 *.egg-info/
