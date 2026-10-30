@@ -11,8 +11,7 @@ from __future__ import annotations
 import os
 import time
 
-from PySide6.QtCore import Qt, QThread, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, QThread, QTimer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
     QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from app import paths
 from app.keycheck import check_key
+from app.links import open_external_url
 from app.router_client import RouterWorker
 
 
@@ -76,13 +76,22 @@ class RouterDialog(QDialog):
         self.table.setTextElideMode(Qt.TextElideMode.ElideNone)   # 标题不省略
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents)             # 行高随内容（长标题换行）
+            QHeaderView.ResizeMode.Interactive)                  # 行高由 _fit_rows 统一算
         h = self.table.horizontalHeader()
-        h.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for i in range(2, 6):
-            h.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        h.setStretchLastSection(False)
+        h.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 44)          # 选
+        h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # 标题：占剩余宽度
+        h.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(2, 64)          # 年
+        h.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(3, 150)         # 期刊
+        h.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(4, 96)          # 可读性
+        h.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(5, 240)         # 为什么/风险（比标题窄）
         self.table.itemDoubleClicked.connect(lambda _i: self.open_fulltext())
+        self.table.horizontalHeader().sectionResized.connect(self._schedule_fit)
         lay.addWidget(self.table, 1)
 
         self.warn = QTextBrowser()
@@ -184,10 +193,8 @@ class RouterDialog(QDialog):
             cell = QTableWidgetItem(extra)
             cell.setToolTip(extra)
             self.table.setItem(row, 5, cell)
-        # 行高按内容自适应，标题长就换行显示（不再固定 48px 截断）
-        self.table.resizeRowsToContents()
-        for row in range(self.table.rowCount()):
-            self.table.setRowHeight(row, max(44, self.table.sizeHintForRow(row)))
+        # 行高按内容自适应（布局完成后再算，否则会用“还没撑开的列宽”算出超高行）
+        self._schedule_fit()
         warnings = data.get("warnings") or []
         degraded = (data.get("meta") or {}).get("degraded")
         self.warn.setPlainText("\n".join(warnings) or ("已降级：SciencePal 不可用" if degraded else "无警告"))
@@ -197,6 +204,21 @@ class RouterDialog(QDialog):
         self.add_btn.setEnabled(bool(self.papers))
         if not self.papers:
             self.status.setText("没有找到候选；可改用 fast、放宽条件，或直接在论文区添加 PDF。")
+
+    def _fit_rows(self):
+        if not self.table.rowCount():
+            return
+        self.table.resizeRowsToContents()
+        for row in range(self.table.rowCount()):
+            if self.table.rowHeight(row) < 44:
+                self.table.setRowHeight(row, 44)
+
+    def _schedule_fit(self, *_args):
+        QTimer.singleShot(0, self._fit_rows)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._schedule_fit()
 
     def _on_failed(self, msg: str):
         self.search_btn.setEnabled(True)
@@ -234,17 +256,14 @@ class RouterDialog(QDialog):
         if not url:
             QMessageBox.information(self, "没有链接", "这篇候选没有 PMID/链接，无法打开。")
             return
-        ok = QDesktopServices.openUrl(QUrl(url))
-        if not ok:                          # 极少数环境没有默认浏览器关联
-            try:
-                import webbrowser
-                ok = bool(webbrowser.open(url))
-            except Exception:  # noqa: BLE001
-                ok = False
-        if not ok:
-            QApplication.clipboard().setText(url)
-            QMessageBox.information(self, "已复制链接",
-                                    "系统未能自动打开浏览器，链接已复制到剪贴板：\n%s" % url)
+        ok, how = open_external_url(url)
+        if ok:
+            self.status.setText("已请求系统打开（%s）：%s" % (how, url))
+            return
+        QMessageBox.information(
+            self, "未能自动打开浏览器",
+            "系统拒绝了自动打开（%s）。\n链接已复制到剪贴板，可粘贴到浏览器：\n%s"
+            % (how, url))
 
     def copy_doi(self):
         p = self._row_paper()

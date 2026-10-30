@@ -351,6 +351,7 @@ curl http://127.0.0.1:8080/healthz
 | **fast vs balanced 文档** | 接入说明新增 3.1：fast 0 条提示词（全规则），balanced 1 条提示词（逐句解释 + 解析/降级路径） |
 | **只填 Key 的 balanced** | 未配 `SCIENCEPAL_FILTER_AGENT_ID` 时自动从可用 Agent 里选（唯一可用，或名称含 filter/筛/审核/HCC 的唯一匹配）；无法唯一确定才降级 fast，并提示显式配置；成功时 warning 标注“已自动使用…” |
 | **候选对话框修复** | “打开 PMC/PubMed”未选行时默认打开第一篇、并有浏览器失败兜底；标题列不再截断（行高随内容换行）；保存候选出错不再静默（弹错误框），未勾选时可一键保存全部；新增 3 项 UI 测试 → test_router_engine 9/9 |
+| **对话框修复 2** | 打开链接改为 `startfile`→Qt→webbrowser 三级兜底并给出可见反馈；标题列加宽、风险列收窄、其余列固定/可调且全部换行，行高在布局完成后统一计算（修掉超高行）；数据目录改为“探针可写”选择，`LocalLow` 不可写时自动回退（解决保存 PermissionError）；新增 test_paths（2 项） |
 | **接入文档** | 新增 `docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`（官方 8 条规则、fast vs balanced、五阶段、错误码、本次修复） |
 | **测试** | Router 新增 `test_agent_client.py`（8 项，全离线）→ 19 项；桌面新增 `test_sciencepal_client.py`（4 项）→ 9 个脚本 |
 

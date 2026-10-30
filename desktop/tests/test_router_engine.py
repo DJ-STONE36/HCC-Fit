@@ -174,19 +174,38 @@ def _dialog_with_papers():
 
 
 def case_open_link_without_selection():
-    from PySide6.QtGui import QDesktopServices
+    from app import router_dialog as rd
     dlg = _dialog_with_papers()
     dlg.table.setCurrentCell(-1, -1)
     opened = []
-    orig = QDesktopServices.openUrl
-    QDesktopServices.openUrl = staticmethod(lambda u: opened.append(u.toString()) or True)
+    orig = rd.open_external_url
+    rd.open_external_url = lambda url: (opened.append(url) or (True, "test"))
     try:
         dlg.open_fulltext()
     finally:
-        QDesktopServices.openUrl = orig
+        rd.open_external_url = orig
         dlg.close()
     assert opened == ["https://pubmed.ncbi.nlm.nih.gov/111/"], opened
     return "未选行时打开第一篇（不再无反应）"
+
+
+def case_open_external_fallback():
+    import os
+    import webbrowser
+    from PySide6.QtGui import QDesktopServices
+    from app import links
+    orig_start, orig_qt, orig_wb = os.startfile, QDesktopServices.openUrl, webbrowser.open
+    os.startfile = lambda _u: (_ for _ in ()).throw(OSError("blocked"))
+    QDesktopServices.openUrl = staticmethod(lambda _u: False)
+    webbrowser.open = lambda _u: True
+    try:
+        ok, how = links.open_external_url("https://example.test/x")
+    finally:
+        os.startfile = orig_start
+        QDesktopServices.openUrl = orig_qt
+        webbrowser.open = orig_wb
+    assert ok and how == "webbrowser", (ok, how)
+    return "startfile/Qt 失败后仍能打开"
 
 
 def case_titles_wrap():
@@ -194,10 +213,13 @@ def case_titles_wrap():
     from PySide6.QtCore import Qt
     dlg = _dialog_with_papers()
     try:
-        vh = dlg.table.verticalHeader()
-        assert vh.sectionResizeMode(0) == QHeaderView.ResizeMode.ResizeToContents
         assert dlg.table.textElideMode() == Qt.TextElideMode.ElideNone
-        assert dlg.table.rowHeight(0) > 44, dlg.table.rowHeight(0)
+        dlg.show()
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, dlg._fit_rows)
+        dlg._fit_rows()
+        h = dlg.table.rowHeight(0)
+        assert 44 <= h <= 160, h          # 合理换行高度，不是被固定成 48
         full = dlg.table.item(0, 1).text()
         assert "Multicenter Study" in full      # 完整标题保留在 item 里
     finally:
@@ -235,6 +257,7 @@ def main():
     check("后台线程：外部 HTTP", case_worker_http)
     check("对话框只有内置引擎", case_dialog)
     check("打开链接（未选行）", case_open_link_without_selection)
+    check("打开链接多级兜底", case_open_external_fallback)
     check("标题换行完整显示", case_titles_wrap)
     check("保存候选", case_save_candidates)
     ok = sum(1 for r in RESULTS if r)

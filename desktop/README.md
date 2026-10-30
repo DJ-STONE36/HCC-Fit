@@ -127,7 +127,8 @@ python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切�
 测试：
 
 ```bash
-python tests/test_router_engine.py   # 内置引擎 + 候选对话框（打开链接/标题换行/保存）9 项
+python tests/test_router_engine.py   # 内置引擎 + 候选对话框（打开链接/标题换行/保存）10 项
+python tests/test_paths.py           # 数据目录可写性/回退 2 项
 python tests/test_router_client.py   # Router 场景映射
 ```
 
@@ -136,7 +137,8 @@ python tests/test_router_client.py   # Router 场景映射
 - 工作区：`QStandardPaths.AppLocalDataLocation/workspaces/<sid>`；
 - 输入会话：`QStandardPaths.AppLocalDataLocation/inputs/<input_id>.json`；
 - 补充记录：`QStandardPaths.AppLocalDataLocation/supplements/<supplement_id>.json`；
-- 可用环境变量 `HCCFIT_DATA_DIR` 覆盖（测试用）。
+- 可用环境变量 `HCCFIT_DATA_DIR` 覆盖（测试用）；未设置时会在 `AppData` 候选目录里挑**真正可写**的，
+  不可写（如受限进程的 `LocalLow`）会自动回退到临时目录，避免 `PermissionError`。
 - Key 只放输入框内存，不写 QSettings、不写日志、不写 `visit.json`；
 - QSettings 只保存模式/场景/Base/Agent。
 

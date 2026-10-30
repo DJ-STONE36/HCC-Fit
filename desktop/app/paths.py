@@ -21,21 +21,46 @@ if str(CORE) not in sys.path:
 SID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
-def app_data_dir() -> Path:
-    """数据目录：可用 HCCFIT_DATA_DIR 覆盖；失败时退回系统临时目录。"""
-    override = os.environ.get("HCCFIT_DATA_DIR")
-    if override:
-        base = Path(override)
-    else:
-        loc = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
-        base = Path(loc) if loc else (Path.home() / ".hcc-fit")
+def _probe_writable(path: Path) -> bool:
+    """真正写一个探针文件，确认目录可写（mkdir 成功不等于能写）。"""
     try:
-        base.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".hccfit_write_test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        return True
     except OSError:
-        import tempfile
-        base = Path(tempfile.gettempdir()) / "HCC-Fit"
-        base.mkdir(parents=True, exist_ok=True)
-    return base
+        return False
+
+
+def _data_candidates() -> list[Path]:
+    override = (os.environ.get("HCCFIT_DATA_DIR") or "").strip()
+    if override:
+        return [Path(override)]
+    out: list[Path] = []
+    qt = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
+    if qt:
+        out.append(Path(qt))
+    local = (os.environ.get("LOCALAPPDATA") or "").strip()
+    if local:
+        out.append(Path(local) / "HCC-Fit")
+    out.append(Path.home() / ".hcc-fit")
+    return out
+
+
+def app_data_dir() -> Path:
+    """数据目录：HCCFIT_DATA_DIR 覆盖；否则按候选顺序找第一个**真正可写**的目录。
+
+    注意：受限/沙盒进程里 `QStandardPaths` 可能给到 AppData\\LocalLow（存在但不可写），
+    只 mkdir 会误判，所以这里用探针文件确认；都失败才退回系统临时目录。
+    """
+    for base in _data_candidates():
+        if _probe_writable(base):
+            return base
+    import tempfile
+    fallback = Path(tempfile.gettempdir()) / "HCC-Fit"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 def new_sid() -> str:
