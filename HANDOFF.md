@@ -312,6 +312,7 @@ curl http://127.0.0.1:8080/healthz
 | 空格软切分 | `split_sentences()` 重写；保护数字+单位/否定/拉丁名；支持“3 年”→36 个月 |
 | 术语表 | 新增 `treatment.transplant`（肝移植） |
 | 测试 | 输入归一 12 → 15 项（含 schema 校验、AI 已移除断言）；场景卡加零追问场景 |
+| 文档截图 | `desktop/docs/input_review.png` 重拍（7 列、显示“信息/足够”，无 AI 行） |
 | 构建 | PyInstaller one-dir 重建，`--smoke` 退出码 0 |
 | 版本控制 | 新增 git 基线（`.gitignore` 排除构建产物与运行期数据），便于后续 diff/回滚 |
 
