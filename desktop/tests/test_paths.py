@@ -51,9 +51,49 @@ def case_unwritable_falls_back():
     return "不可写时回退到：%s" % got
 
 
+def case_open_directory():
+    """打开工作区：空路径/不存在要明确报原因；成功走 startfile，失败退回 explorer。"""
+    from app import links
+    ok, why = links.open_directory("")
+    assert not ok and "没有工作区路径" in why, why
+    ok, why = links.open_directory(str(BASE / "no_such_workspace_dir"))
+    assert not ok and "目录不存在" in why, why
+
+    had = hasattr(os, "startfile")
+    orig_start = getattr(os, "startfile", None)
+    called = []
+    os.startfile = lambda p: called.append(p)          # type: ignore[attr-defined]
+    try:
+        ok, how = links.open_directory(str(BASE))
+        assert ok and how == "os.startfile", (ok, how)
+        assert called == [str(BASE)], called
+
+        # startfile 失败 → 退回 explorer.exe（同样只记录，不真开窗口）
+        def boom(_p):
+            raise OSError("no association")
+        os.startfile = boom                             # type: ignore[attr-defined]
+        import app.links as L
+        orig_popen = L.subprocess.Popen
+        launched = []
+        L.subprocess.Popen = lambda args, **k: launched.append(list(args))
+        try:
+            ok, how = links.open_directory(str(BASE))
+            assert ok and how == "explorer.exe", (ok, how)
+            assert launched and launched[0][0] == "explorer.exe", launched
+        finally:
+            L.subprocess.Popen = orig_popen
+    finally:
+        if had:
+            os.startfile = orig_start                   # type: ignore[attr-defined]
+        else:
+            delattr(os, "startfile")
+    return "空/不存在有原因；startfile → explorer 回退"
+
+
 def main():
     check("HCCFIT_DATA_DIR 可写", case_override_used)
     check("不可写目录自动回退", case_unwritable_falls_back)
+    check("打开工作区回退链", case_open_directory)
     ok = sum(1 for r in RESULTS if r)
     print("\n%d/%d 通过" % (ok, len(RESULTS)))
     return 0 if ok == len(RESULTS) else 1

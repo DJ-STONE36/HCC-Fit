@@ -233,6 +233,39 @@ def _log_attempt(url: str, ok: bool, how: str, detail: str = "") -> None:
         pass
 
 
+def open_directory(path) -> tuple[bool, str]:
+    """用资源管理器打开目录；返回 (是否成功, 方式 / 失败原因)。
+
+    为什么不用单一的 QDesktopServices.openUrl：它失败时只返回 False，界面上表现为
+    “点了没反应”。这里按可靠性依次退回：os.startfile → explorer.exe → Qt。
+    """
+    p = str(path or "").strip()
+    if not p:
+        return False, "没有工作区路径（先跑一次核查）"
+    if not os.path.isdir(p):
+        return False, "目录不存在：%s" % p
+
+    errors: list[str] = []
+    if os.name == "nt" and hasattr(os, "startfile"):
+        try:
+            os.startfile(p)  # type: ignore[attr-defined]
+            return True, "os.startfile"
+        except OSError as exc:
+            errors.append("startfile: %s" % exc)
+        try:
+            subprocess.Popen(["explorer.exe", p])
+            return True, "explorer.exe"
+        except OSError as exc:
+            errors.append("explorer: %s" % exc)
+    try:
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(p)):
+            return True, "QDesktopServices"
+        errors.append("QDesktopServices: 返回 False")
+    except Exception as exc:  # noqa: BLE001
+        errors.append("QDesktopServices: %s" % exc)
+    return False, "；".join(errors) or "未知原因"
+
+
 def open_external_url(url: str) -> tuple[bool, str]:
     _last_attempts.clear()
     ok, how = _open_external_url(url)

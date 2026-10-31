@@ -6,8 +6,8 @@ import time
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QStandardPaths, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QBrush, QColor, QDesktopServices, QFont
+from PySide6.QtCore import QSettings, QStandardPaths, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QVBoxLayout, QWidget,
 )
 
-from app import export, input_store, paths, supplement_store
+from app import export, input_store, links, paths, supplement_store
 from app.input_review import InputReviewDialog
 from app.router_client import RouterError, from_session
 from app.router_dialog import RouterDialog
@@ -1214,8 +1214,20 @@ class MainWindow(QMainWindow):
 
     def open_workspace(self):
         if not self.workspace:
+            QMessageBox.information(
+                self, "还没有工作区",
+                "先跑一次核查（或补充资料重跑），“工作区”才会生成，"
+                "里面是 logs/、runs/、files/、sp_raw/。")
             return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.workspace)))
+        ok, how = links.open_directory(self.workspace)
+        if ok:
+            self.statusBar().showMessage("已打开工作区（%s）：%s" % (how, self.workspace), 8000)
+            return
+        QGuiApplication.clipboard().setText(str(self.workspace))
+        QMessageBox.warning(
+            self, "打开工作区失败",
+            "没能调起资源管理器：%s\n\n"
+            "路径已复制到剪贴板，可直接粘贴到资源管理器地址栏：\n%s" % (how, self.workspace))
 
     # ---------------- 测试连接 ----------------
     def _check_key(self, *_args):

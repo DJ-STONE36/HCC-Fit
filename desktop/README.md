@@ -30,6 +30,8 @@ python main.py
 - 结果：结论、四维表（含证据强度）、逐维理由与引文、论文/方案/期望、原始返回；
 - 二次 JSON 修复：首次返回 Markdown 时自动追问 JSON，成功后绿色提示，原始 Markdown 保留；
 - 运行计时、当前阶段、失败原因；“打开工作区”可看 `run.log` / `sp_raw/`；
+  打不开时不再静默（`app/links.py:open_directory()` 依次试 `os.startfile` → `explorer.exe` →
+  `QDesktopServices`，全失败则把路径复制到剪贴板并弹窗说明原因）；工作区还没生成时会提示先跑一次；
 - 原始返回：**默认隐藏**（右上角“显示原始返回”可展开）；Agent 降级或二次 JSON 修复时自动显示；
   勾选后页签排在“补充资料”**之后**；内容始终保存在 `visit.json` 的 `raw_answers`（给 Agent/审计），PDF 不包含原文；
 - 导出：PDF（给人看，一页/两页 A4）与 JSON（`visit.json`，给 Agent）。
