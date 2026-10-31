@@ -4,6 +4,9 @@
 输入一段患者描述，自动整理成可审阅的场景卡，再让 SciencePal Agent 判断：某个已发表的 HCC 预测模型/列线图，是否适用于这位患者、这个时点、这个结局。
 
 > 仅用于临床决策前的证据准备与模型适用性讨论：**不做诊断、不推荐治疗、不预测个体生存期数字**，结论需医生判读。
+>
+> **许可**：本仓库与随附的 Windows 打包版本按《HCC-Fit 测试评估许可》提供——**专有、保留所有权利**，
+> 仅限内部评估测试，禁止商业使用与再分发。详见 [`LICENSE.md`](LICENSE.md)。
 
 ## 它解决什么问题
 
@@ -113,3 +116,16 @@ python -m unittest discover -s tests
 - 交接与现状：[`HANDOFF_2026-10-31.md`](HANDOFF_2026-10-31.md)
 - SciencePal 接入与检索说明：[`docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md`](docs/HCC-Fit_SciencePal接入与检索说明_2026-10-30.md)
 - 桌面端细节：[`desktop/README.md`](desktop/README.md)
+- 许可条款：[`LICENSE.md`](LICENSE.md)
+
+## 许可
+
+本仓库代码、文档与随附的 Windows 打包版本均按 **HCC-Fit 测试评估许可（Proprietary Evaluation License）**
+提供：Copyright (c) 2026 WANG Ziye. All rights reserved.
+
+- 允许：内部评估、试用、运行、为评估阅读源码、反馈问题；
+- 禁止：商业使用、对外提供服务、再分发（含转发 zip/网盘/镜像）、作为医疗器械或用于诊断决策；
+- 期限：自获取起 90 天，或作者书面终止；终止后停止使用并删除副本；
+- 需商业使用 / 机构部署 / 再分发：请先取得作者书面许可。
+
+完整条款见 [`LICENSE.md`](LICENSE.md)。
