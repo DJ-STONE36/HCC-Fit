@@ -74,6 +74,33 @@ def _text(value) -> str:
     return str(value or "").strip()
 
 
+def resume_target(visit: dict):
+    """补充资料重跑的“原会话/原工作区”：返回 (thread_id, workspace)，没有则空串。
+
+    有 thread_id 就**不新开会话**：用 add_message + agent/start 在原会话里追加一轮。
+    """
+    prov = (visit or {}).get("provenance") or {}
+    return (str(prov.get("thread_id") or "").strip(),
+            str(prov.get("workspace") or "").strip())
+
+
+def with_doc_texts(raw_text: str, docs) -> str:
+    """同会话无法追加文件时：把附件抽出的文字并入补充原文，并标明来源。
+
+    docs: [{"name": 文件名, "text": 抽取到的文字}]；抽不到文字的跳过。
+    """
+    parts = []
+    if (raw_text or "").strip():
+        parts.append(raw_text.strip())
+    for d in docs or []:
+        body = str((d or {}).get("text") or "").strip()
+        if not body:
+            continue
+        parts.append("【附件《%s》的文字内容（同一会话里不能追加文件，故随本条消息附上）】\n%s"
+                     % (d.get("name") or "附件", body))
+    return "\n\n".join(parts)
+
+
 def build_supplemented_scenario(visit: dict, raw_text: str, attachments=None) -> dict:
     """原场景 + 补充原文 + 附件说明；不自动解释、不伪造已补齐。
 

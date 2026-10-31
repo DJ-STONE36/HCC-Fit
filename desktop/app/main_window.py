@@ -20,7 +20,8 @@ from app import export, input_store, paths, supplement_store
 from app.input_review import InputReviewDialog
 from app.router_client import RouterError, from_session
 from app.router_dialog import RouterDialog
-from app.supplement import Supplement, build_supplemented_scenario
+from app.supplement import (Supplement, build_supplemented_scenario,
+                            resume_target, with_doc_texts)
 from app.input_normalization import RuleExtractor
 from app.workers import ProbeWorker, RunWorker
 
@@ -436,6 +437,13 @@ class MainWindow(QMainWindow):
         self.supplement_files_list.setFixedHeight(58)
         self.supplement_files_list.setVisible(False)
         sv.addWidget(self.supplement_files_list)
+        self.supplement_new_session = QCheckBox(
+            "为附件新开会话（会丢掉上一轮上下文；只在必须原样上传 PDF 时勾选）")
+        self.supplement_new_session.setToolTip(
+            "默认沿用原会话：平台的追问接口只能发文字，PDF 会先抽出文字随消息附上。\n"
+            "勾选后改为新开会话、把 PDF 原样上传，但 Agent 看不到上一轮的对话。")
+        self.supplement_new_session.setVisible(False)
+        sv.addWidget(self.supplement_new_session)
         self.supplement_status = QLabel("先完成一次核查，报告会列出缺失项。")
         self.supplement_status.setWordWrap(True)
         self.supplement_status.setStyleSheet("color:#66727f;")
@@ -659,13 +667,16 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(0)
         self._launch_worker(mode, scenario, names, ws)
 
-    def _launch_worker(self, mode, scenario, names, ws, attachments=None):
+    def _launch_worker(self, mode, scenario, names, ws, attachments=None,
+                       thread_id=None, resume=False):
         self._rebuild_stages()               # 清掉上一次运行的逐篇行
         opts = {
             "api_key": self.key.text().strip(),
             "timeout": 240 if mode == "sciencepal_hcc" else 180,
             "split_papers": self.split_papers.isChecked(),
             "attachments": list(attachments or []),
+            "thread_id": str(thread_id or ""),
+            "resume": bool(resume),
         }
         self.thread = QThread(self)
         self.worker = RunWorker(mode, str(ws), scenario, names, opts)
@@ -793,6 +804,7 @@ class MainWindow(QMainWindow):
         has = bool(self.supplement_files)
         self.supplement_files_list.setVisible(has)
         self.supplement_pdf_clear.setEnabled(has)
+        self.supplement_new_session.setVisible(has)
 
     def _typed_supplement_text(self):
         lines = []
@@ -806,6 +818,30 @@ class MainWindow(QMainWindow):
 
     def _supplement_text(self):
         return self._typed_supplement_text()
+
+    def _supplement_plan(self):
+        """(是否沿用原会话, thread_id, 原工作区路径)。
+
+        默认沿用原会话（不新开会话）；只有勾选“为附件新开会话”且确实带了附件时才新开。
+        """
+        tid, ws = resume_target(self.visit)
+        if not tid:
+            return False, "", ws
+        if self.supplement_files and self.supplement_new_session.isChecked():
+            return False, tid, ws
+        return True, tid, ws
+
+    def _supplement_doc_texts(self):
+        """同会话里只能发文字：把附件抽成文字（抽不到的进 bad，由界面提示）。"""
+        from pdftext import extract
+
+        docs, bad = [], []
+        for f in self.supplement_files:
+            body, _note = extract(f["path"], limit=3000)
+            docs.append({"name": f["name"], "text": body})
+            if not body:
+                bad.append(f["name"])
+        return docs, bad
 
     def _validate_supplement(self):
         if not hasattr(self, "supplement_btn"):
@@ -825,9 +861,16 @@ class MainWindow(QMainWindow):
                 "至少填写一项、合计 10 个字，或上传 PDF 附件后才能重新提交；原报告会保留。")
             return
         self.supplement_btn.setEnabled(True)
-        extra = "，附 %d 个 PDF（原样发给 Agent）" % docs if docs else ""
+        reuse, tid, _ws = self._supplement_plan()
+        if reuse:
+            how = "在同一会话里追问（不新开会话）"
+        elif tid:
+            how = "新开会话（已勾选“为附件新开会话”）"
+        else:
+            how = "新开会话（原报告没有会话 ID，无法续话）"
+        extra = "，附 %d 个 PDF" % docs if docs else ""
         self.supplement_status.setText(
-            "将用“原场景 + 补充资料%s”全量重跑；原报告保留。" % extra)
+            "将%s%s：原场景 + 补充资料；原报告保留。" % (how, extra))
 
     def start_supplement_run(self):
         if self.thread is not None or not self.visit:
@@ -846,17 +889,48 @@ class MainWindow(QMainWindow):
         if mode in ("sciencepal", "sciencepal_hcc") and not self.key.text().strip():
             QMessageBox.warning(self, "缺少 Key", "补充重跑沿用 SciencePal 模式，需要填 API Key。")
             return
-        extra = "（附 %d 个 PDF）" % len(docs) if docs else ""
+
+        reuse, tid, parent_ws = self._supplement_plan()
+        attach_names = []
+        if reuse and docs:
+            # 同一会话的追问接口只能发文字（平台限制）：抽文字随消息附上
+            doc_texts, bad = self._supplement_doc_texts()
+            if bad and not text:
+                QMessageBox.warning(
+                    self, "附件读不出来",
+                    "同一会话里不能追加文件，而这些 PDF 也没抽出文字：\n\n- "
+                    + "\n- ".join(bad)
+                    + "\n\n请把关键内容粘贴到输入框，或勾选“为附件新开会话”后重试。")
+                return
+            if bad:
+                ans = QMessageBox.question(
+                    self, "有附件读不出来",
+                    "同一会话里不能追加文件，以下 PDF 没抽出文字，本次不会带上它们：\n\n- "
+                    + "\n- ".join(bad)
+                    + "\n\n可把这些内容粘贴到输入框，或勾选“为附件新开会话”。"
+                    "只用文字部分继续？")
+                if ans != QMessageBox.StandardButton.Yes:
+                    return
+            text = with_doc_texts(text, doc_texts)
+
+        how = ("沿用原会话追问（不新开会话）" if reuse
+               else "新开会话并重新开始（上一轮上下文不可见）")
+        extra = "（附 %d 个 PDF%s）" % (
+            len(docs), "，已转为文字随消息发送" if reuse and docs else "") if docs else ""
         if QMessageBox.question(self, "重新提交分析",
-                                "将作为一次新的核查提交，使用原场景 + 补充资料%s全量重跑；"
-                                "PDF 会原样作为附件发给 Agent，并提示它是患者资料、不是论文。"
-                                "原报告会保留。继续？" % extra) != QMessageBox.StandardButton.Yes:
+                                "将%s：用原场景 + 补充资料重跑%s；原报告会保留。继续？"
+                                % (how, extra)) != QMessageBox.StandardButton.Yes:
             return
         try:
-            sid = paths.new_sid()
-            ws = paths.workspace(sid)
-            names = paths.stage_files(self.files, ws)
-            attach_names = paths.stage_files(docs, ws) if docs else []
+            if reuse:
+                ws = Path(parent_ws) if parent_ws and Path(parent_ws).is_dir() else None
+                if ws is None:
+                    ws = paths.workspace(paths.new_sid())
+                names = [str(f) for f in ((parent.get("provenance") or {}).get("files") or [])]
+            else:
+                ws = paths.workspace(paths.new_sid())
+                names = paths.stage_files(self.files, ws)
+                attach_names = paths.stage_files(docs, ws) if docs else []
         except Exception as exc:  # noqa: BLE001
             self.error.setText("工作区失败：%s: %s" % (type(exc).__name__, exc))
             self.error.setVisible(True)
@@ -865,7 +939,7 @@ class MainWindow(QMainWindow):
         if mode == "sciencepal_hcc" and not names and not scenario.get("paper_text"):
             QMessageBox.warning(self, "缺少论文", "补充重跑仍需要论文 PDF 或正文。")
             return
-        record_text = text or ("附件：" + "、".join(attach_names))
+        record_text = text or ("附件：" + "、".join(attach_names or [f["name"] for f in self.supplement_files]))
         sup = Supplement.from_visit(parent, record_text)
         for i, it in enumerate(sup.expected_items):
             if i < len(self.supplement_inputs):
@@ -893,7 +967,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("补充资料重跑中…")
         self.tabs.setCurrentIndex(0)
         self._validate_supplement()
-        self._launch_worker(mode, scenario, names, ws, attachments=attach_names)
+        self._launch_worker(mode, scenario, names, ws, attachments=attach_names,
+                            thread_id=tid if reuse else None, resume=reuse)
 
     def _ensure_stage_row(self, key: str, label: str | None = None):
         """找到 stage 行；逐篇事件（如 match#0 / hcc#0）按父行之后插入。"""

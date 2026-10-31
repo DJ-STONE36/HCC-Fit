@@ -375,6 +375,15 @@
             "type": "string"
           }
         },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace": {
+          "type": "string"
+        },
         "stages_ms": {
           "type": "object",
           "additionalProperties": {

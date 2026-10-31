@@ -97,15 +97,18 @@ python tests/test_input_review.py          # 场景卡 UI 冒烟（含零追问�
 
 - 上方用**一个只读文本框**显示报告认为还缺的资料，自动换行、不横向滚动；
 - 下方**每一条缺失资料对应一个输入框**，填这一项的资料；
-- **可上传 PDF 附件**（病理 / 化验 / 影像报告等）：点“上传 PDF 附件（可选）”，
-  文件**原样作为附件发给 Agent**，本地不抽文本（扫描件也能读，只要平台能解析）；
-  提示词会说明「这些是报告后补充的**患者资料**，不是论文：不要列进 papers、不要当论文证据，
-  附件里没写的仍写 unknown」；
-- 平台万一解析不了附件（`workspace_context_prepare_failed`），会退回 `core/pdftext.py`
-  抽文字塞进 prompt，并标记 `degraded`；
-- “重新提交分析”：用**原场景 + 补充原文 + 附件**全量重跑，不改 Agent v0.6；
+- **默认“接着原会话说”，不新开会话**：`visit.json.provenance.thread_id` 存着上一轮的会话 ID，
+  重跑时用它 `POST /thread/{tid}/messages` + `/agent/start` 追加一轮，Agent 仍看得到上一轮的对话；
+  提示词会加一段「本次为补充资料后的重跑｜沿用原会话：只更新受新资料影响的判断」；
+- **可上传 PDF 附件**（病理 / 化验 / 影像报告等）：点“上传 PDF 附件（可选）”。
+  平台的追问接口只能发文字（`{"message_id","content"}`，不带文件），所以同会话里
+  PDF 会先用 `core/pdftext.py` 抽文字、以「【附件《X》的文字内容】」随消息附上；
+  抽不出文字（扫描件）会明确提示，不会假装读到；
+- 需要**原样上传 PDF** 时，勾选“为附件新开会话（会丢上下文）”——这时才走新会话
+  + multipart 上传，提示词说明「这些是报告后补充的**患者资料**，不是论文：不要列进 papers、
+  不要当论文证据，附件里没写的仍写 unknown」；
 - 原报告保留，完成后顶部可切换“本次报告 / 上一次报告”；新一轮报告会清空上一轮附件；
-- 补充记录存 `AppLocalData/supplements/<supplement_id>.json`；附件随工作区
+- 补充记录存 `AppLocalData/supplements/<supplement_id>.json`；新会话模式下附件随
   `workspaces/<sid>/files/` 落盘，`visit.json.provenance.attachments` 记录文件名；
 - 补充只追加资料，不自动改诊断；改变疾病/治疗/时点请回场景卡确认；
 - 补充原文按“资料名：内容”拼成一段；只有附件没填文字时，会在场景里加
@@ -115,8 +118,8 @@ python tests/test_input_review.py          # 场景卡 UI 冒烟（含零追问�
 测试：
 
 ```bash
-python tests/test_supplement.py      # 拼接/落盘/空输入/附件场景/附件提示词/透传
-python tests/test_supplement_ui.py   # stub → 上传 PDF（原样附件）→ 全量重跑 → 新旧切换；页签顺序
+python tests/test_supplement.py      # 拼接/落盘/附件/提示词/续会话（不 initiate）/首轮 initiate
+python tests/test_supplement_ui.py   # stub → 上传 PDF → 重跑 → 新旧切换；页签顺序；续会话判定
 ```
 
 ![补充资料页签](docs/supplement_tab.png)

@@ -16,17 +16,21 @@ def build_planner(mode: str, workspace, scenario: dict, files, opts: dict, emit)
 
     mode = (mode or "sciencepal").lower()
     atts = [a for a in (opts.get("attachments") or []) if str(a).strip()]  # 补充资料附件
+    tid = str(opts.get("thread_id") or "").strip() or None
+    resume = bool(opts.get("resume")) and bool(tid)
     if mode == HCC_MODE:
         brain = SciencePalBrain(workspace, api_key=opts.get("api_key"), base=opts.get("base"),
                                 agent_name=opts.get("agent_name") or "HCC-Fit",
-                                timeout=int(opts.get("timeout") or 240), strict_agent=True)
+                                timeout=int(opts.get("timeout") or 240), strict_agent=True,
+                                thread_id=tid, resume=resume)
         return HccPlanner(brain, str(workspace), scenario, emit=emit, files=files,
                           split_papers=bool(opts.get("split_papers")), attachments=atts)
 
     if mode == "sciencepal":
         brain = SciencePalBrain(workspace, api_key=opts.get("api_key"), base=opts.get("base"),
                                 agent_name=opts.get("agent_name") or "HCC-Fit",
-                                timeout=int(opts.get("timeout") or 180))
+                                timeout=int(opts.get("timeout") or 180),
+                                thread_id=tid, resume=resume)
         return Planner(brain, str(workspace), scenario, emit=emit, files=files,
                        split_papers=bool(opts.get("split_papers")), attachments=atts)
 

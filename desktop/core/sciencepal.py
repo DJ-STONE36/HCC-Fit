@@ -66,7 +66,7 @@ class SciencePalBrain(Brain):
     available = True
 
     def __init__(self, workspace, api_key=None, base=None, agent_name=None, timeout=180,
-                 strict_agent=False, agent_id=None, **opts):
+                 strict_agent=False, agent_id=None, thread_id=None, resume=False, **opts):
         super().__init__(workspace, **opts)
         raw_key = (api_key or os.environ.get("SCIENCEPAL_API_KEY") or "")
         self.key, self._key_issue = _clean_key(raw_key)
@@ -78,7 +78,9 @@ class SciencePalBrain(Brain):
         self.agent_id = str(agent_id or "").strip()
         self.timeout = timeout
         self.strict_agent = strict_agent      # 单次核查模式：找不到指定 Agent 就报错，不静默自动路由
-        self._thread_id = None
+        # 传入原会话 ID = 接着旧会话追问（补充资料重跑），**不**再 initiate
+        self._thread_id = str(thread_id).strip() if thread_id else None
+        self.resume = bool(resume) or bool(self._thread_id)
         self._direct_run = None
         self._agent_id_cache = None
         self.last_text = None
@@ -92,6 +94,11 @@ class SciencePalBrain(Brain):
         if not self.key:
             return "空"
         return "长度 %d，形如 %s…%s" % (len(self.key), self.key[:4], self.key[-4:])
+
+    @property
+    def thread_id(self):
+        """本次运行的会话 ID；补充资料重跑时用它“接着上一轮说”。"""
+        return self._thread_id
 
     # ---------------- 低层 ----------------
     def _req(self, method, path, data=None, headers=None, timeout=None):
@@ -848,6 +855,15 @@ class SciencePalBrain(Brain):
         "· 不要输出 XML / function_calls 作为最终内容。\n\n"
     )
 
+    # 补充资料重跑：沿用原会话，不再新开
+    RESUME_NOTE = (
+        "【本次为补充资料后的重跑｜沿用原会话】\n"
+        "· 你在这个会话里已经做过一轮同样的核查，用户现在在上一条消息后补充了资料。\n"
+        "· 请只针对受新资料影响的判断更新结论；没有受影响的可以沿用上一轮结论，但要前后自洽。\n"
+        "· 不要复述上一轮已经说过的分析过程，直接给更新后的结果。\n"
+        "· 新资料不足以改变结论时，就明确写“补充资料不改变原结论”，不要为了显得有变化而改判。\n\n"
+    )
+
     def run_stage(self, stage: str, payload: dict) -> dict:
         if not self.key:
             raise BrainError("没有 API Key：请在“3 · 大脑”里填入 SciencePal API Key")
@@ -857,6 +873,7 @@ class SciencePalBrain(Brain):
         atts = [a for a in (payload.get("attachments") or []) if str(a).strip()]
         prompt = (
             self.CONTRACT
+            + (self.RESUME_NOTE if self.resume else "")
             + "【本阶段任务】%s\n\n"
             "【最小必需结构（照这个形状给，字段可增减）】\n```json\n%s\n```\n\n"
             "【场景】\n%s\n\n【可用文件（临时位点，可直接读取）】\n%s\n\n"
@@ -882,6 +899,8 @@ class SciencePalBrain(Brain):
         """
         if not self.key:
             raise BrainError("没有 API Key：请在界面填入 SciencePal Key")
+        if self.resume:
+            prompt = self.RESUME_NOTE + prompt
         self._require_report = True
         try:
             return self._run_agent(prompt, files or [], None)

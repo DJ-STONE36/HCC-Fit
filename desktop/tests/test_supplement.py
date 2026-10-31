@@ -181,11 +181,92 @@ def case_hcc_attachments():
     return "单次核查：附件进 prompt / 上传列表 / provenance"
 
 
+def case_resume_target():
+    from app.supplement import resume_target
+    v = make_visit()
+    v["provenance"] = {"thread_id": "th-1", "workspace": r"D:\ws\1"}
+    assert resume_target(v) == ("th-1", r"D:\ws\1")
+    assert resume_target(make_visit()) == ("", "")
+    assert resume_target(None) == ("", "")
+    return "有 thread_id 就续原会话，没有则空"
+
+
+def case_with_doc_texts():
+    from app.supplement import with_doc_texts
+    out = with_doc_texts("病理：MVI 阴性", [
+        {"name": "病理报告.pdf", "text": "MVI negative, capsule intact."},
+        {"name": "扫描件.pdf", "text": ""},
+    ])
+    assert out.startswith("病理：MVI 阴性")
+    assert "【附件《病理报告.pdf》的文字内容" in out
+    assert "扫描件.pdf" not in out, "抽不到文字的附件不写进消息"
+    only = with_doc_texts("", [{"name": "a.pdf", "text": "x"}])
+    assert only.startswith("【附件《a.pdf》"), only
+    assert with_doc_texts(" ", []) == ""
+    return "同会话附件转文字，抽不到的跳过"
+
+
+def _brain(tmp):
+    from sciencepal import SciencePalBrain
+    return SciencePalBrain(str(tmp), api_key="dummy-key")
+
+
+def case_brain_resume_thread():
+    """有 thread_id：走 add_message + start（不 initiate），prompt 带“沿用原会话”。"""
+    tmp = BASE / "tests" / "_tmp_resume"
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        b = _brain(tmp)
+        b._thread_id = "th-1"
+        b.resume = True
+        seen = {}
+        b._start_followup = lambda tid, prompt: (
+            seen.update(tid=tid, prompt=prompt) or "run-1")
+        b._poll = lambda rid, tid, stage=None: {"status": "in_scope", "note_zh": "ok"}
+
+        def no_initiate(*a, **k):
+            raise AssertionError("续会话时不应再 initiate")
+        b._initiate = no_initiate
+        out = b.run_stage("domain", {"scenario": {"task_zh": "x"}, "files": []})
+        assert out["status"] == "in_scope"
+        assert seen["tid"] == "th-1", seen
+        assert "沿用原会话" in seen["prompt"]
+        assert b.thread_id == "th-1"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return "续会话走 followup，不 initiate"
+
+
+def case_brain_fresh_thread():
+    """没有 thread_id：照旧 initiate，prompt 不带续会话说明。"""
+    tmp = BASE / "tests" / "_tmp_fresh"
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        b = _brain(tmp)
+        seen = {}
+
+        def fake_init(prompt, files):
+            seen["prompt"] = prompt
+            b._thread_id = "th-new"          # 真实 _initiate 会记下会话 ID
+            return {"thread_id": "th-new", "run_id": "run-new"}
+
+        b._initiate = fake_init
+        b._poll = lambda rid, tid, stage=None: {"status": "in_scope", "note_zh": "ok"}
+        b.run_stage("domain", {"scenario": {"task_zh": "x"}, "files": []})
+        assert "沿用原会话" not in seen["prompt"]
+        assert b.thread_id == "th-new"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return "首次运行仍 initiate，并记住 thread"
+
+
 def main():
     tests = [("拼接 scenario", case_build), ("补充记录", case_model),
              ("数组输入", case_split_list), ("空输入", case_empty),
              ("PDF 附件", case_attachments), ("附件提示词", case_attachment_prompt),
-             ("附件透传", case_planner_payload), ("单次核查附件", case_hcc_attachments)]
+             ("附件透传", case_planner_payload), ("单次核查附件", case_hcc_attachments),
+             ("续会话目标", case_resume_target), ("附件转文字", case_with_doc_texts),
+             ("续会话不新开", case_brain_resume_thread), ("首轮开新会话", case_brain_fresh_thread)]
     ok = 0
     for name, fn in tests:
         try:

@@ -212,6 +212,8 @@ class Planner:
             "provenance": {
                 "brain": getattr(self.brain, "name", None),
                 "agent_name": self.brain.opts.get("agent_name") if hasattr(self.brain, "opts") else None,
+                "thread_id": getattr(self.brain, "thread_id", None),
+                "workspace": self.workspace,
                 "files": self.files,
                 "attachments": self.attachments,
                 "stages_ms": self.timing,
@@ -423,6 +425,8 @@ class HccPlanner:
         visit = normalize_report(out, self.scenario, one, self.workspace, raw, ms,
                                  agent_name=getattr(self.brain, "agent_name", None))
         visit.setdefault("provenance", {})["attachments"] = list(self.attachments)
+        visit["provenance"]["thread_id"] = getattr(self.brain, "thread_id", None)
+        visit["provenance"]["workspace"] = self.workspace
         if repaired and original_text:
             visit["raw_answers"].insert(0, {"stage": "hcc_original", "text": original_text[:8000]})
         return visit

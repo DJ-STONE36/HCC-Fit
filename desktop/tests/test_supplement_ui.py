@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from app.input_normalization import RuleExtractor  # noqa: E402
 from app.main_window import MainWindow  # noqa: E402
+from app.supplement import with_doc_texts  # noqa: E402
 from pdf_fixture import PATHOLOGY, write_text_pdf  # noqa: E402
 
 
@@ -122,6 +123,21 @@ def main():
     win.report_switch.setCurrentIndex(0)
     QTest.qWait(100)
     assert win.visit["visit_id"] == new["visit_id"]
+
+    # 续会话判定：有 thread_id 且未勾“新开会话”→ 沿用原会话，附件转文字
+    win.visit["provenance"]["thread_id"] = "th-test"
+    win.visit["provenance"]["workspace"] = str(win.workspace)
+    assert win._supplement_plan()[0] is True
+    win.add_supplement_pdfs([str(pdf)])
+    docs, bad = win._supplement_doc_texts()
+    assert docs and docs[0]["text"] and not bad, (docs, bad)
+    assert "【附件《病理报告.pdf》的文字内容" in with_doc_texts("补充", docs)
+    assert not win.supplement_new_session.isHidden(), "有附件时应出现“新开会话”复选框"
+    win.supplement_new_session.setChecked(True)
+    assert win._supplement_plan()[0] is False, "勾选后应改为新开会话"
+    win.supplement_new_session.setChecked(False)
+    assert win._supplement_plan()[0] is True
+    win.clear_supplement_files()
 
     win.close()
     shutil.rmtree(_DATA, ignore_errors=True)
