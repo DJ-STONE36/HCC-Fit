@@ -67,6 +67,24 @@ class Supplement:
         return obj
 
 
+def merge_attachment_text(raw_text: str, attachments) -> str:
+    """把补充资料 PDF 的抽取正文并入补充原文。
+
+    attachments: [{"name": 文件名, "text": 抽取到的正文}]。
+    抽不到正文的附件跳过（界面负责提示用户），不伪造内容。
+    """
+    parts = []
+    typed = (raw_text or "").strip()
+    if typed:
+        parts.append(typed)
+    for a in attachments or []:
+        body = str(a.get("text") or "").strip()
+        if not body:
+            continue
+        parts.append("附件《%s》正文：%s" % (a.get("name") or "附件", body))
+    return "\n".join(parts)
+
+
 def _text(value) -> str:
     """兼容 visit.json 的数组字段和旧版字符串字段。"""
     if isinstance(value, (list, tuple)):

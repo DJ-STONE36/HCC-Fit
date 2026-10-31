@@ -13,12 +13,14 @@ shutil.rmtree(_DATA, ignore_errors=True)
 _DATA.mkdir(parents=True, exist_ok=True)
 os.environ["HCCFIT_DATA_DIR"] = str(_DATA)
 sys.path.insert(0, str(BASE))
+sys.path.insert(0, str(BASE / "tests"))
 
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from app.input_normalization import RuleExtractor  # noqa: E402
 from app.main_window import MainWindow  # noqa: E402
+from pdf_fixture import PATHOLOGY, write_text_pdf  # noqa: E402
 
 
 def main():
@@ -49,6 +51,29 @@ def main():
     assert len(win.supplement_inputs) == len(old["expected_data"])
     assert "报告认为" not in win.supplement_expected.toPlainText()
 
+    # 「原始返回」勾选后应排在「补充资料」之后（最后一个页签）
+    win.show_raw.setChecked(True)
+    assert win.tabs.indexOf(win.raw_page) == win.tabs.indexOf(win.supplement_page) + 1, (
+        "原始返回页签应在补充资料之后")
+    win.show_raw.setChecked(False)
+    assert win.tabs.indexOf(win.raw_page) == -1
+
+    # 补充资料阶段可上传 PDF：抽取正文并入补充文本
+    pdf = write_text_pdf(_DATA / "病理报告.pdf", PATHOLOGY)
+    win.add_supplement_pdfs([str(pdf), str(pdf)])          # 重复加入应去重
+    assert len(win.supplement_files) == 1, win.supplement_files
+    assert win.supplement_files[0]["text"], "测试 PDF 应能抽出文字"
+    assert "附件《病理报告.pdf》正文：" in win._supplement_text()
+    assert not win.supplement_files_list.isHidden(), "有附件时应显示附件列表"
+    # 非 PDF / 抽不到文字的附件：列入“未提取”，不写进补充正文
+    bad = _DATA / "扫描件.txt"
+    bad.write_text("not a pdf", encoding="utf-8")
+    win.add_supplement_pdfs([str(bad)])
+    assert len(win.supplement_files) == 2
+    assert win.supplement_files[1]["text"] == ""
+    assert "扫描件.txt" not in win._supplement_text()
+    assert win._supplement_unreadable() == ["扫描件.txt"]
+
     for _, edit in win.supplement_inputs:
         edit.setPlainText("病理：中分化 HCC，MVI 阴性；手术日期 2026-10-20。")
     QTest.qWait(100)
@@ -75,6 +100,9 @@ def main():
     assert new and new["visit_id"] != old["visit_id"]
     assert win.previous_visit["visit_id"] == old["visit_id"]
     assert "报告后补充资料" in new["scenario"]["patient_summary_zh"]
+    assert "附件《病理报告.pdf》正文：" in new["scenario"]["patient_summary_zh"]
+    assert "MVI negative" in new["scenario"]["patient_summary_zh"]
+    assert not win.supplement_files, "新一轮报告应清空上一轮附件"
     given = new["scenario"]["inputs_given"]
     assert "报告后补充：" in ("、".join(given) if isinstance(given, list) else given)
     assert win.report_switch.count() == 2

@@ -31,7 +31,7 @@ python main.py
 - 二次 JSON 修复：首次返回 Markdown 时自动追问 JSON，成功后绿色提示，原始 Markdown 保留；
 - 运行计时、当前阶段、失败原因；“打开工作区”可看 `run.log` / `sp_raw/`；
 - 原始返回：**默认隐藏**（右上角“显示原始返回”可展开）；Agent 降级或二次 JSON 修复时自动显示；
-  内容始终保存在 `visit.json` 的 `raw_answers`（给 Agent/审计），PDF 不包含原文；
+  勾选后页签排在“补充资料”**之后**；内容始终保存在 `visit.json` 的 `raw_answers`（给 Agent/审计），PDF 不包含原文；
 - 导出：PDF（给人看，一页/两页 A4）与 JSON（`visit.json`，给 Agent）。
 
 ![逐篇进度：每篇一行，各自显示运行中/完成与耗时](docs/per_paper_progress.png)
@@ -97,17 +97,21 @@ python tests/test_input_review.py          # 场景卡 UI 冒烟（含零追问�
 
 - 上方用**一个只读文本框**显示报告认为还缺的资料，自动换行、不横向滚动；
 - 下方**每一条缺失资料对应一个输入框**，填这一项的资料；
-- “重新提交分析”：用**原场景 + 补充原文**全量重跑，不改 Agent v0.6；
-- 原报告保留，完成后顶部可切换“本次报告 / 上一次报告”；
+- **可上传 PDF 附件**（病理 / 化验 / 影像报告等）：点“上传 PDF 附件（可选）”，
+  自动用 `core/pdftext.py` 抽取正文并入补充资料（每份上限 2500 字）；
+  抽不到文字（扫描件 / 特殊字体）会标黄并在重跑前明确提示，**不会**假装读到；
+- “重新提交分析”：用**原场景 + 补充原文（含附件正文）**全量重跑，不改 Agent v0.6；
+- 原报告保留，完成后顶部可切换“本次报告 / 上一次报告”；新一轮报告会清空上一轮附件；
 - 补充记录存 `AppLocalData/supplements/<supplement_id>.json`；
 - 补充只追加资料，不自动改诊断；改变疾病/治疗/时点请回场景卡确认；
-- 补充原文会按“资料名：内容”拼成一段，再交给下一次全量重跑。
+- 补充原文会按“资料名：内容”“附件《文件名》正文：内容”拼成一段，再交给下一次全量重跑。
+- “原始返回”页签（勾选右上角后才出现）固定排在“补充资料”**之后**，不抢在补充操作前面。
 
 测试：
 
 ```bash
-python tests/test_supplement.py      # 拼接/落盘/空输入
-python tests/test_supplement_ui.py   # stub → 补充 → 重跑 → 新旧切换
+python tests/test_supplement.py      # 拼接/落盘/空输入/PDF 附件并入
+python tests/test_supplement_ui.py   # stub → 上传 PDF → 全量重跑 → 新旧切换；页签顺序
 ```
 
 ![补充资料页签](docs/supplement_tab.png)

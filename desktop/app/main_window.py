@@ -20,7 +20,7 @@ from app import export, input_store, paths, supplement_store
 from app.input_review import InputReviewDialog
 from app.router_client import RouterError, from_session
 from app.router_dialog import RouterDialog
-from app.supplement import Supplement, build_supplemented_scenario
+from app.supplement import Supplement, build_supplemented_scenario, merge_attachment_text
 from app.input_normalization import RuleExtractor
 from app.workers import ProbeWorker, RunWorker
 
@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.files = []
+        self.supplement_files = []       # 补充资料阶段的 PDF 附件（含抽取正文）
         self.visit = None
         self.thread = None
         self.worker = None
@@ -417,6 +418,23 @@ class MainWindow(QMainWindow):
         self.supplement_items_area.setWidget(self.supplement_items_body)
         sv.addWidget(self.supplement_items_area)
         self.supplement_inputs = []
+
+        pdf_row = QHBoxLayout()
+        self.supplement_pdf_btn = QPushButton("上传 PDF 附件（可选）")
+        self.supplement_pdf_btn.setToolTip(
+            "可上传病理 / 化验 / 影像报告等 PDF：自动抽取文字并入补充资料，随全量重跑发给 Agent。")
+        self.supplement_pdf_btn.clicked.connect(self.pick_supplement_pdfs)
+        self.supplement_pdf_clear = QPushButton("清空附件")
+        self.supplement_pdf_clear.setEnabled(False)
+        self.supplement_pdf_clear.clicked.connect(self.clear_supplement_files)
+        pdf_row.addWidget(self.supplement_pdf_btn)
+        pdf_row.addWidget(self.supplement_pdf_clear)
+        pdf_row.addStretch(1)
+        sv.addLayout(pdf_row)
+        self.supplement_files_list = QListWidget()
+        self.supplement_files_list.setFixedHeight(58)
+        self.supplement_files_list.setVisible(False)
+        sv.addWidget(self.supplement_files_list)
         self.supplement_status = QLabel("先完成一次核查，报告会列出缺失项。")
         self.supplement_status.setWordWrap(True)
         self.supplement_status.setStyleSheet("color:#66727f;")
@@ -738,7 +756,59 @@ class MainWindow(QMainWindow):
             "当前报告：%s；补充后全量重跑，原报告保留。" % (v.get("visit_id") or ""))
         self._validate_supplement()
 
-    def _supplement_text(self):
+    # ---------------- 补充资料：PDF 附件 ----------------
+    def pick_supplement_pdfs(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "选择补充资料 PDF", "", "PDF (*.pdf);;所有文件 (*)")
+        if files:
+            self.add_supplement_pdfs(files)
+
+    def add_supplement_pdfs(self, paths_):
+        """加入补充资料 PDF：立即抽取正文，抽不到就明确标注（不伪造内容）。"""
+        from pdftext import extract
+
+        for p in paths_:
+            if any(f["path"] == p for f in self.supplement_files):
+                continue
+            try:
+                size_mb = Path(p).stat().st_size / 1024.0 / 1024.0
+            except OSError:
+                size_mb = 0.0
+            if size_mb > 30:
+                text, note = "", "文件 %.0f MB，超过 30 MB 上限，请拆分后再上传" % size_mb
+            else:
+                text, note = extract(p, limit=2500)
+            self.supplement_files.append({
+                "path": str(p),
+                "name": Path(p).name,
+                "text": text,
+                "note": note,
+            })
+        self._refresh_supplement_files()
+        self._validate_supplement()
+
+    def clear_supplement_files(self):
+        self.supplement_files = []
+        self._refresh_supplement_files()
+        self._validate_supplement()
+
+    def _refresh_supplement_files(self):
+        self.supplement_files_list.clear()
+        for f in self.supplement_files:
+            if f["text"]:
+                label = "%s　·　已抽取 %d 字" % (f["name"], len(f["text"]))
+            else:
+                label = "%s　·　未提取到文字（可能是扫描件）" % f["name"]
+            item = QListWidgetItem(label)
+            item.setToolTip("%s\n%s" % (f["path"], f["note"] or ""))
+            if not f["text"]:
+                item.setForeground(QBrush(QColor("#b9770e")))
+            self.supplement_files_list.addItem(item)
+        has = bool(self.supplement_files)
+        self.supplement_files_list.setVisible(has)
+        self.supplement_pdf_clear.setEnabled(has)
+
+    def _typed_supplement_text(self):
         lines = []
         for item, edit in self.supplement_inputs:
             val = edit.toPlainText().strip()
@@ -747,6 +817,12 @@ class MainWindow(QMainWindow):
             name = str(item.get("item_zh") or "其他补充") if item else "其他补充"
             lines.append("%s：%s" % (name, val))
         return "\n".join(lines)
+
+    def _supplement_text(self):
+        return merge_attachment_text(self._typed_supplement_text(), self.supplement_files)
+
+    def _supplement_unreadable(self):
+        return [f["name"] for f in self.supplement_files if not f["text"]]
 
     def _validate_supplement(self):
         if not hasattr(self, "supplement_btn"):
@@ -761,18 +837,34 @@ class MainWindow(QMainWindow):
             return
         if len(text) < 10:
             self.supplement_btn.setEnabled(False)
-            self.supplement_status.setText("至少填写一项、合计 10 个字后才能重新提交；原报告会保留。")
+            self.supplement_status.setText("至少填写一项、合计 10 个字（或上传可读 PDF）后才能重新提交；原报告会保留。")
             return
         self.supplement_btn.setEnabled(True)
-        self.supplement_status.setText("将用“原场景 + 补充资料”全量重跑；原报告保留。")
+        used = [f for f in self.supplement_files if f["text"]]
+        extra = "，含 %d 个 PDF 附件正文" % len(used) if used else ""
+        bad = self._supplement_unreadable()
+        bad_note = "；%d 个附件没提取到文字，不会发送" % len(bad) if bad else ""
+        self.supplement_status.setText(
+            "将用“原场景 + 补充资料%s”全量重跑%s；原报告保留。" % (extra, bad_note))
 
     def start_supplement_run(self):
         if self.thread is not None or not self.visit:
             return
         text = self._supplement_text().strip()
         if len(text) < 10:
-            QMessageBox.warning(self, "补充太少", "请至少填写一项、合计 10 个字的补充资料。")
+            QMessageBox.warning(self, "补充太少",
+                                "请至少填写一项、合计 10 个字的补充资料，"
+                                "或上传可提取文字的 PDF。")
             return
+        bad = self._supplement_unreadable()
+        if bad:
+            ans = QMessageBox.question(
+                self, "附件没提取到文字",
+                "以下 PDF 没有可提取的文字（可能是扫描件 / 特殊字体），"
+                "不会随本次重跑发送：\n\n- " + "\n- ".join(bad) +
+                "\n\n可以改用能复制文字的 PDF，或把关键内容粘贴到输入框。仍要继续？")
+            if ans != QMessageBox.StandardButton.Yes:
+                return
         parent = self.visit
         mode = parent.get("mode") or self.current_mode()
         idx = self.mode.findData(mode)
@@ -785,9 +877,11 @@ class MainWindow(QMainWindow):
         if mode == "sciencepal_hcc" and not self.files and not scenario.get("paper_text"):
             QMessageBox.warning(self, "缺少论文", "补充重跑仍需要论文 PDF 或正文。")
             return
+        used = [f for f in self.supplement_files if f["text"]]
+        extra = "（含 %d 个 PDF 附件正文）" % len(used) if used else ""
         if QMessageBox.question(self, "重新提交分析",
-                                "将作为一次新的核查提交，使用原场景 + 补充资料全量重跑；"
-                                "原报告会保留。继续？") != QMessageBox.StandardButton.Yes:
+                                "将作为一次新的核查提交，使用原场景 + 补充资料%s全量重跑；"
+                                "原报告会保留。继续？" % extra) != QMessageBox.StandardButton.Yes:
             return
         try:
             sid = paths.new_sid()
@@ -934,14 +1028,14 @@ class MainWindow(QMainWindow):
 
     # ---------------- 渲染 ----------------
     def _apply_raw_visibility(self, checked=None):
-        """原始返回页：默认不显示，勾选后才插入到“补充资料”之前。"""
+        """原始返回页：默认不显示；勾选后插到「补充资料」之后（即最后一个页签）。"""
         if checked is None:
             checked = self.show_raw.isChecked()
         idx = self.tabs.indexOf(self.raw_page)
         if checked and idx < 0:
-            ins = self.tabs.indexOf(self.supplement_page)
-            self.tabs.insertTab(ins if ins >= 0 else self.tabs.count(),
-                                self.raw_page, "原始返回")
+            sup = self.tabs.indexOf(self.supplement_page)
+            at = (sup + 1) if sup >= 0 else self.tabs.count()
+            self.tabs.insertTab(min(at, self.tabs.count()), self.raw_page, "原始返回")
         elif not checked and idx >= 0:
             self.tabs.removeTab(idx)
 
@@ -996,6 +1090,8 @@ class MainWindow(QMainWindow):
             "sciencepal": "SciencePal Agent",
             "sciencepal_hcc": "SciencePal · HCC-Fit 报告",
         }.get(mode, mode or ""))
+        if self.supplement_files:            # 新一轮报告：上一轮的附件不再沿用
+            self.clear_supplement_files()
         self._render_supplement(v)
 
     def _render_matrix(self, v: dict):

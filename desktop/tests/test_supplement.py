@@ -10,7 +10,8 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 sys.path.insert(0, str(BASE / "core"))
 
-from app.supplement import Supplement, build_supplemented_scenario  # noqa: E402
+from app.supplement import (Supplement, build_supplemented_scenario,  # noqa: E402
+                            merge_attachment_text)
 
 
 def make_visit():
@@ -86,9 +87,24 @@ def case_empty():
     return "空补充不改 scenario"
 
 
+def case_attachments():
+    atts = [{"name": "病理报告.pdf", "text": "MVI negative, capsule intact."},
+            {"name": "扫描件.pdf", "text": ""}]
+    merged = merge_attachment_text("病理：中分化 HCC", atts)
+    assert merged.startswith("病理：中分化 HCC"), merged
+    assert "附件《病理报告.pdf》正文：" in merged, merged
+    assert "扫描件.pdf" not in merged, "抽不到正文的附件不应写进补充文本"
+    # 只有附件、没填文字时也要能提交
+    only = merge_attachment_text("", atts[:1])
+    assert only.startswith("附件《病理报告.pdf》正文："), only
+    assert merge_attachment_text("x", []) == "x"
+    return "PDF 正文并入补充资料；无正文的附件跳过"
+
+
 def main():
     tests = [("拼接 scenario", case_build), ("补充记录", case_model),
-             ("数组输入", case_split_list), ("空输入", case_empty)]
+             ("数组输入", case_split_list), ("空输入", case_empty),
+             ("PDF 附件", case_attachments)]
     ok = 0
     for name, fn in tests:
         try:

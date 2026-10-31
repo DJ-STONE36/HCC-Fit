@@ -67,12 +67,14 @@ def case_stub_still_works_for_tests():
     assert "总生存率" in win.scene_example.text(), win.scene_example.text()
     win._fill_scene_example()
     assert "从今天开始" in win.scene_input.toPlainText()
-    # 原始返回默认不占页签；勾选后才出现
+    # 原始返回默认不占页签；勾选后才出现，且排在「补充资料」之后
     win.show_raw.setChecked(False)
     assert win.tabs.indexOf(win.raw_page) == -1, "默认不该显示原始返回页"
     win.show_raw.setChecked(True)
     assert win.tabs.indexOf(win.raw_page) >= 0
     assert win.tabs.tabText(win.tabs.indexOf(win.raw_page)) == "原始返回"
+    assert (win.tabs.indexOf(win.raw_page)
+            == win.tabs.indexOf(win.supplement_page) + 1), "原始返回应在补充资料之后"
     win.show_raw.setChecked(False)
     assert win.tabs.indexOf(win.raw_page) == -1
     assert win.mode.count() == 2, win.mode.count()
