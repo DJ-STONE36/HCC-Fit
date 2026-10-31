@@ -369,6 +369,12 @@
             "type": "string"
           }
         },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "stages_ms": {
           "type": "object",
           "additionalProperties": {

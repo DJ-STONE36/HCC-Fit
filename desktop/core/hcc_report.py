@@ -102,7 +102,24 @@ def _title_from_name(name):
     return title[:120] or "上传论文（未命名）"
 
 
-def build_prompt(scenario, paper_text, file_names):
+def attachments_block(names):
+    """报告后补充资料附件的提示词说明块（五阶段 / 单次核查共用）。无附件返回空串。"""
+    names = [str(n) for n in (names or []) if str(n).strip()]
+    if not names:
+        return ""
+    return (
+        "【报告后补充的患者资料（附件，不是论文）】\n"
+        "- 附件：%s\n"
+        "- 这些是用户在上一次报告后补充的**患者资料**（病理 / 化验 / 影像 / 随访记录等），"
+        "请直接读取附件内容再判断，不要只根据文件名猜。\n"
+        "- 它们不是论文：**不要列进 papers，也不要当论文证据引用**。\n"
+        "- 读到什么就用什么：能补齐上一轮缺失项就更新对应判断，附件里没写的仍写 unknown / 未给出，"
+        "不要因为附件的存在就假定资料已齐全，更不要编造数值。\n\n"
+        % "、".join(names)
+    )
+
+
+def build_prompt(scenario, paper_text, file_names, attachments=None):
     """把场景 + 论文拼成一次 Agent 调用。"""
     tp = TIMEPOINT_ZH.get(scenario.get("use_timepoint") or "", scenario.get("use_timepoint") or "未指定")
     files = "、".join(file_names) if file_names else "（无附件，正文见下）"
@@ -129,6 +146,7 @@ def build_prompt(scenario, paper_text, file_names):
         "【论文】\n"
         "- 附件：%s（若平台能读附件，请直接读；读不到再用下面的文字）\n"
         "- 正文/关键段落：\n%s\n\n"
+        "%s"
         "【输出结构｜严格按这个 JSON】\n%s\n\n"
         "注意：verdict 只能是 match / mismatch / unclear；input_check 要逐变量说明目标时点是否可得；"
         "expected_data 要写清“还缺什么、为什么、补齐能解锁什么”。\n\n"
@@ -145,6 +163,7 @@ def build_prompt(scenario, paper_text, file_names):
             _s(scenario.get("inputs_missing"), 400) or "未填写",
             files,
             text or "（未提供正文；请只基于附件核查，信息不足就写 unclear）",
+            attachments_block(attachments),
             SCHEMA_HINT,
         )
     )

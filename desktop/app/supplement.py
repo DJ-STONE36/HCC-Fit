@@ -67,24 +67,6 @@ class Supplement:
         return obj
 
 
-def merge_attachment_text(raw_text: str, attachments) -> str:
-    """把补充资料 PDF 的抽取正文并入补充原文。
-
-    attachments: [{"name": 文件名, "text": 抽取到的正文}]。
-    抽不到正文的附件跳过（界面负责提示用户），不伪造内容。
-    """
-    parts = []
-    typed = (raw_text or "").strip()
-    if typed:
-        parts.append(typed)
-    for a in attachments or []:
-        body = str(a.get("text") or "").strip()
-        if not body:
-            continue
-        parts.append("附件《%s》正文：%s" % (a.get("name") or "附件", body))
-    return "\n".join(parts)
-
-
 def _text(value) -> str:
     """兼容 visit.json 的数组字段和旧版字符串字段。"""
     if isinstance(value, (list, tuple)):
@@ -92,16 +74,27 @@ def _text(value) -> str:
     return str(value or "").strip()
 
 
-def build_supplemented_scenario(visit: dict, raw_text: str) -> dict:
-    """原场景 + 补充原文；不自动解释、不伪造已补齐。"""
+def build_supplemented_scenario(visit: dict, raw_text: str, attachments=None) -> dict:
+    """原场景 + 补充原文 + 附件说明；不自动解释、不伪造已补齐。
+
+    attachments：已落盘的附件文件名（PDF 原样上传给 Agent，本地不抽文本）。
+    """
     sc = copy.deepcopy(visit.get("scenario") or {})
     add = (raw_text or "").strip()[:4000]
-    if not add:
+    docs = [str(a).strip() for a in (attachments or []) if str(a).strip()]
+    if not add and not docs:
         return sc
+    parts = []
+    if add:
+        parts.append(add)
+    if docs:
+        parts.append("另附资料文件（请直接读取附件，不要当论文）：" + "、".join(docs))
+    block = "【报告后补充资料】\n" + "\n".join(parts)
     patient = _text(sc.get("patient_summary_zh"))
-    sc["patient_summary_zh"] = (patient + "\n\n【报告后补充资料】\n" + add).strip()
+    sc["patient_summary_zh"] = (patient + "\n\n" + block).strip()
     given = _text(sc.get("inputs_given"))
-    sc["inputs_given"] = (given + ("；" if given else "") + "报告后补充：" + add).strip()
+    brief = add or ("附件：" + "、".join(docs))
+    sc["inputs_given"] = (given + ("；" if given else "") + "报告后补充：" + brief).strip()
     # visit.json 里 inputs_missing 是数组；Planner._split 需要字符串或数组，这里统一成字符串
     sc["inputs_missing"] = _text(sc.get("inputs_missing"))
     # 是否补齐由下一次 Agent 判断，不在这里假装补上

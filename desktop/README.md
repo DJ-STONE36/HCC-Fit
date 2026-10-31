@@ -98,20 +98,25 @@ python tests/test_input_review.py          # 场景卡 UI 冒烟（含零追问�
 - 上方用**一个只读文本框**显示报告认为还缺的资料，自动换行、不横向滚动；
 - 下方**每一条缺失资料对应一个输入框**，填这一项的资料；
 - **可上传 PDF 附件**（病理 / 化验 / 影像报告等）：点“上传 PDF 附件（可选）”，
-  自动用 `core/pdftext.py` 抽取正文并入补充资料（每份上限 2500 字）；
-  抽不到文字（扫描件 / 特殊字体）会标黄并在重跑前明确提示，**不会**假装读到；
-- “重新提交分析”：用**原场景 + 补充原文（含附件正文）**全量重跑，不改 Agent v0.6；
+  文件**原样作为附件发给 Agent**，本地不抽文本（扫描件也能读，只要平台能解析）；
+  提示词会说明「这些是报告后补充的**患者资料**，不是论文：不要列进 papers、不要当论文证据，
+  附件里没写的仍写 unknown」；
+- 平台万一解析不了附件（`workspace_context_prepare_failed`），会退回 `core/pdftext.py`
+  抽文字塞进 prompt，并标记 `degraded`；
+- “重新提交分析”：用**原场景 + 补充原文 + 附件**全量重跑，不改 Agent v0.6；
 - 原报告保留，完成后顶部可切换“本次报告 / 上一次报告”；新一轮报告会清空上一轮附件；
-- 补充记录存 `AppLocalData/supplements/<supplement_id>.json`；
+- 补充记录存 `AppLocalData/supplements/<supplement_id>.json`；附件随工作区
+  `workspaces/<sid>/files/` 落盘，`visit.json.provenance.attachments` 记录文件名；
 - 补充只追加资料，不自动改诊断；改变疾病/治疗/时点请回场景卡确认；
-- 补充原文会按“资料名：内容”“附件《文件名》正文：内容”拼成一段，再交给下一次全量重跑。
+- 补充原文按“资料名：内容”拼成一段；只有附件没填文字时，会在场景里加
+  “另附资料文件（请直接读取附件，不要当论文）：…”。
 - “原始返回”页签（勾选右上角后才出现）固定排在“补充资料”**之后**，不抢在补充操作前面。
 
 测试：
 
 ```bash
-python tests/test_supplement.py      # 拼接/落盘/空输入/PDF 附件并入
-python tests/test_supplement_ui.py   # stub → 上传 PDF → 全量重跑 → 新旧切换；页签顺序
+python tests/test_supplement.py      # 拼接/落盘/空输入/附件场景/附件提示词/透传
+python tests/test_supplement_ui.py   # stub → 上传 PDF（原样附件）→ 全量重跑 → 新旧切换；页签顺序
 ```
 
 ![补充资料页签](docs/supplement_tab.png)

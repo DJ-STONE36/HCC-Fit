@@ -15,24 +15,25 @@ def build_planner(mode: str, workspace, scenario: dict, files, opts: dict, emit)
     from sciencepal import SciencePalBrain
 
     mode = (mode or "sciencepal").lower()
+    atts = [a for a in (opts.get("attachments") or []) if str(a).strip()]  # 补充资料附件
     if mode == HCC_MODE:
         brain = SciencePalBrain(workspace, api_key=opts.get("api_key"), base=opts.get("base"),
                                 agent_name=opts.get("agent_name") or "HCC-Fit",
                                 timeout=int(opts.get("timeout") or 240), strict_agent=True)
         return HccPlanner(brain, str(workspace), scenario, emit=emit, files=files,
-                          split_papers=bool(opts.get("split_papers")))
+                          split_papers=bool(opts.get("split_papers")), attachments=atts)
 
     if mode == "sciencepal":
         brain = SciencePalBrain(workspace, api_key=opts.get("api_key"), base=opts.get("base"),
                                 agent_name=opts.get("agent_name") or "HCC-Fit",
                                 timeout=int(opts.get("timeout") or 180))
         return Planner(brain, str(workspace), scenario, emit=emit, files=files,
-                       split_papers=bool(opts.get("split_papers")))
+                       split_papers=bool(opts.get("split_papers")), attachments=atts)
 
     # 仅自动化测试使用：界面不提供离线演示模式
     if mode == "stub":
         return Planner(StubBrain(workspace), str(workspace), scenario, emit=emit, files=files,
-                       split_papers=bool(opts.get("split_papers")))
+                       split_papers=bool(opts.get("split_papers")), attachments=atts)
 
     # 旧报告里可能残留已移除的模式（manual / mock_sp）：明确报错，不静默产出演示数据
     raise BrainError("该大脑模式已移除：%s；请在“3 · 大脑”里选择 SciencePal 模式"

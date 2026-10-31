@@ -51,12 +51,13 @@ def _split(text):
 
 class Planner:
     def __init__(self, brain, workspace: str, scenario: dict, emit=None, files=None,
-                 split_papers: bool = False):
+                 split_papers: bool = False, attachments=None):
         self.brain = brain
         self.workspace = workspace
         self.scenario = scenario
         self.emit = emit or (lambda ev: None)
         self.files = files or []
+        self.attachments = [a for a in (attachments or []) if str(a).strip()]  # 报告后补充的患者资料
         self.split_papers = bool(split_papers)   # 多篇时逐篇发给 Agent（S2 单独调用）
         self.timing = {}
         self.saved_path = None
@@ -150,7 +151,8 @@ class Planner:
 
     # ---------- 主流程 ----------
     def run(self):
-        base = {"scenario": self.scenario, "files": self.files}
+        base = {"scenario": self.scenario, "files": self.files,
+                "attachments": self.attachments}
 
         domain = self._stage("domain", base)
 
@@ -211,6 +213,7 @@ class Planner:
                 "brain": getattr(self.brain, "name", None),
                 "agent_name": self.brain.opts.get("agent_name") if hasattr(self.brain, "opts") else None,
                 "files": self.files,
+                "attachments": self.attachments,
                 "stages_ms": self.timing,
             },
             "disclaimer_zh": DISCLAIMER,
@@ -303,12 +306,13 @@ class HccPlanner:
     LABEL = "HCC-Fit 单次核查"
 
     def __init__(self, brain, workspace: str, scenario: dict, emit=None, files=None,
-                 split_papers: bool = False):
+                 split_papers: bool = False, attachments=None):
         self.brain = brain
         self.workspace = workspace
         self.scenario = scenario or {}
         self.emit = emit or (lambda ev: None)
         self.files = files or []
+        self.attachments = [a for a in (attachments or []) if str(a).strip()]
         self.split_papers = bool(split_papers)
         self.saved_path = None
 
@@ -379,8 +383,10 @@ class HccPlanner:
 
         t0 = time.time()
         try:
-            prompt = build_prompt(self.scenario, self._paper_text(one), one)
+            prompt = build_prompt(self.scenario, self._paper_text(one), one,
+                                  attachments=self.attachments)
             abs_files = [os.path.join(self.workspace, "files", f) for f in one]
+            abs_files += [os.path.join(self.workspace, "files", a) for a in self.attachments]
             out = self.brain.run_hcc_report(prompt, abs_files)
         except BrainError as exc:
             self.emit({"stage": "hcc", "label": self.LABEL, "status": "error", "detail": str(exc)})
@@ -416,6 +422,7 @@ class HccPlanner:
                 raw = json.dumps(out, ensure_ascii=False)
         visit = normalize_report(out, self.scenario, one, self.workspace, raw, ms,
                                  agent_name=getattr(self.brain, "agent_name", None))
+        visit.setdefault("provenance", {})["attachments"] = list(self.attachments)
         if repaired and original_text:
             visit["raw_answers"].insert(0, {"stage": "hcc_original", "text": original_text[:8000]})
         return visit

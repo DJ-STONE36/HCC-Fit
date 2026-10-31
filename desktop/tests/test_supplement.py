@@ -10,8 +10,7 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 sys.path.insert(0, str(BASE / "core"))
 
-from app.supplement import (Supplement, build_supplemented_scenario,  # noqa: E402
-                            merge_attachment_text)
+from app.supplement import Supplement, build_supplemented_scenario  # noqa: E402
 
 
 def make_visit():
@@ -88,23 +87,105 @@ def case_empty():
 
 
 def case_attachments():
-    atts = [{"name": "病理报告.pdf", "text": "MVI negative, capsule intact."},
-            {"name": "扫描件.pdf", "text": ""}]
-    merged = merge_attachment_text("病理：中分化 HCC", atts)
-    assert merged.startswith("病理：中分化 HCC"), merged
-    assert "附件《病理报告.pdf》正文：" in merged, merged
-    assert "扫描件.pdf" not in merged, "抽不到正文的附件不应写进补充文本"
-    # 只有附件、没填文字时也要能提交
-    only = merge_attachment_text("", atts[:1])
-    assert only.startswith("附件《病理报告.pdf》正文："), only
-    assert merge_attachment_text("x", []) == "x"
-    return "PDF 正文并入补充资料；无正文的附件跳过"
+    v = make_visit()
+    sc = build_supplemented_scenario(v, "", attachments=["病理报告.pdf"])
+    assert "报告后补充资料" in sc["patient_summary_zh"]
+    assert "另附资料文件（请直接读取附件，不要当论文）：病理报告.pdf" in sc["patient_summary_zh"]
+    assert "报告后补充：附件：病理报告.pdf" in sc["inputs_given"]
+    # 文字 + 附件同时存在
+    sc2 = build_supplemented_scenario(v, "病理：MVI 阴性", attachments=["a.pdf", "b.pdf"])
+    assert "病理：MVI 阴性" in sc2["patient_summary_zh"]
+    assert "a.pdf、b.pdf" in sc2["patient_summary_zh"]
+    assert build_supplemented_scenario(v, "", attachments=[]) == v["scenario"]
+    return "附件事项并入场景（只有附件也能重跑）"
+
+
+def case_attachment_prompt():
+    from hcc_report import attachments_block, build_prompt
+    assert attachments_block([]) == ""
+    blk = attachments_block(["病理报告.pdf"])
+    assert "病理报告.pdf" in blk and "不是论文" in blk and "unknown" in blk
+    prompt = build_prompt({"patient_summary_zh": "x"}, "", ["论文.pdf"],
+                          attachments=["病理报告.pdf"])
+    assert "报告后补充的患者资料（附件，不是论文）" in prompt
+    assert prompt.index("病理报告.pdf") > prompt.index("论文.pdf")
+    return "单次核查提示词含“患者资料、不是论文”说明"
+
+
+def case_planner_payload():
+    from planner import Planner
+
+    seen = []
+
+    class RecBrain:
+        name = "rec"
+        opts = {}
+
+        def run_stage(self, key, payload):
+            seen.append(payload)
+            return {
+                "domain": {"status": "in_scope", "note_zh": "ok"},
+                "papers": {"papers": []},
+                "match": {"matched": []},
+                "integrate": {"summary_zh": "", "options": [], "cautions_zh": []},
+                "expected": {"expected_data": []},
+            }[key]
+
+    tmp = BASE / "tests" / "_tmp_plan_att"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        p = Planner(RecBrain(), str(tmp), {"task_zh": "t"}, files=["论文.pdf"],
+                    attachments=["病理报告.pdf"])
+        visit = p.run()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    assert seen and all(x.get("attachments") == ["病理报告.pdf"] for x in seen), seen
+    assert all(x.get("files") == ["论文.pdf"] for x in seen)
+    assert visit["provenance"]["attachments"] == ["病理报告.pdf"]
+    return "五阶段每阶段都带 attachments；论文与附件分开"
+
+
+def case_hcc_attachments():
+    """单次核查：附件进 prompt、进上传列表、进 provenance（不混进 papers）。"""
+    import hcc_report
+    from planner import HccPlanner
+
+    calls = {}
+
+    class B:
+        name = "fake"
+        agent_name = "HCC-Fit"
+
+        def run_hcc_report(self, prompt, files):
+            calls["prompt"] = prompt
+            calls["files"] = list(files)
+            return {"_parse": "text", "_text": "x"}
+
+    tmp = BASE / "tests" / "_tmp_hcc_att"
+    shutil.rmtree(tmp, ignore_errors=True)
+    (tmp / "files").mkdir(parents=True, exist_ok=True)
+    orig = hcc_report.normalize_report
+    hcc_report.normalize_report = lambda *a, **k: {"matched": [], "provenance": {"files": []}}
+    try:
+        p = HccPlanner(B(), str(tmp), {"patient_summary_zh": "x", "task_zh": "y"},
+                       files=["论文.pdf"], attachments=["病理报告.pdf"])
+        visit = p._run_one(["论文.pdf"])
+    finally:
+        hcc_report.normalize_report = orig
+        shutil.rmtree(tmp, ignore_errors=True)
+    assert "报告后补充的患者资料（附件，不是论文）" in calls["prompt"]
+    assert "病理报告.pdf" in calls["prompt"]
+    assert [Path(f).name for f in calls["files"]] == ["论文.pdf", "病理报告.pdf"], calls["files"]
+    assert visit["provenance"]["attachments"] == ["病理报告.pdf"]
+    return "单次核查：附件进 prompt / 上传列表 / provenance"
 
 
 def main():
     tests = [("拼接 scenario", case_build), ("补充记录", case_model),
              ("数组输入", case_split_list), ("空输入", case_empty),
-             ("PDF 附件", case_attachments)]
+             ("PDF 附件", case_attachments), ("附件提示词", case_attachment_prompt),
+             ("附件透传", case_planner_payload), ("单次核查附件", case_hcc_attachments)]
     ok = 0
     for name, fn in tests:
         try:

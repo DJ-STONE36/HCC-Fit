@@ -851,21 +851,27 @@ class SciencePalBrain(Brain):
     def run_stage(self, stage: str, payload: dict) -> dict:
         if not self.key:
             raise BrainError("没有 API Key：请在“3 · 大脑”里填入 SciencePal API Key")
+        from hcc_report import attachments_block
+
         task, skeleton = self.STAGE_PROMPTS[stage]
+        atts = [a for a in (payload.get("attachments") or []) if str(a).strip()]
         prompt = (
             self.CONTRACT
             + "【本阶段任务】%s\n\n"
             "【最小必需结构（照这个形状给，字段可增减）】\n```json\n%s\n```\n\n"
             "【场景】\n%s\n\n【可用文件（临时位点，可直接读取）】\n%s\n\n"
-            "【论文正文片段（用户粘贴，可作为主要依据）】\n%s\n\n【上一阶段结果】\n%s\n"
+            "【论文正文片段（用户粘贴，可作为主要依据）】\n%s\n\n%s【上一阶段结果】\n%s\n"
             % (task, skeleton,
                json.dumps({k: v for k, v in payload.get("scenario", {}).items()
                            if k != "paper_text"}, ensure_ascii=False, indent=2),
                "\n".join(payload.get("files", [])) or "（无）",
                (payload.get("scenario", {}).get("paper_text") or "（无）")[:6000],
-               json.dumps({k: v for k, v in payload.items() if k != "files"}, ensure_ascii=False)[:4000])
+               attachments_block(atts),
+               json.dumps({k: v for k, v in payload.items()
+                           if k not in ("files", "attachments")}, ensure_ascii=False)[:4000])
         )
         files = [os.path.join(self.workspace, "files", f) for f in payload.get("files", [])]
+        files += [os.path.join(self.workspace, "files", a) for a in atts]
         return self._run_agent(prompt, files, stage)
 
     def run_hcc_report(self, prompt, files=None):

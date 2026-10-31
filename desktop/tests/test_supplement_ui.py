@@ -58,21 +58,20 @@ def main():
     win.show_raw.setChecked(False)
     assert win.tabs.indexOf(win.raw_page) == -1
 
-    # 补充资料阶段可上传 PDF：抽取正文并入补充文本
+    # 补充资料阶段可上传 PDF：原样作为附件发给 Agent（不抽文本）
     pdf = write_text_pdf(_DATA / "病理报告.pdf", PATHOLOGY)
     win.add_supplement_pdfs([str(pdf), str(pdf)])          # 重复加入应去重
     assert len(win.supplement_files) == 1, win.supplement_files
-    assert win.supplement_files[0]["text"], "测试 PDF 应能抽出文字"
-    assert "附件《病理报告.pdf》正文：" in win._supplement_text()
+    assert set(win.supplement_files[0]) == {"path", "name"}, win.supplement_files[0]
+    assert win.supplement_files[0]["name"] == "病理报告.pdf"
+    assert "病理报告.pdf" not in win._supplement_text(), "附件不再抽文本进补充原文"
     assert not win.supplement_files_list.isHidden(), "有附件时应显示附件列表"
-    # 非 PDF / 抽不到文字的附件：列入“未提取”，不写进补充正文
-    bad = _DATA / "扫描件.txt"
-    bad.write_text("not a pdf", encoding="utf-8")
-    win.add_supplement_pdfs([str(bad)])
-    assert len(win.supplement_files) == 2
-    assert win.supplement_files[1]["text"] == ""
-    assert "扫描件.txt" not in win._supplement_text()
-    assert win._supplement_unreadable() == ["扫描件.txt"]
+
+    # 只有附件、没填文字时也应允许重新提交
+    for _, edit in win.supplement_inputs:
+        edit.setPlainText("")
+    QTest.qWait(100)
+    assert win.supplement_btn.isEnabled(), win.supplement_status.text()
 
     for _, edit in win.supplement_inputs:
         edit.setPlainText("病理：中分化 HCC，MVI 阴性；手术日期 2026-10-20。")
@@ -100,8 +99,10 @@ def main():
     assert new and new["visit_id"] != old["visit_id"]
     assert win.previous_visit["visit_id"] == old["visit_id"]
     assert "报告后补充资料" in new["scenario"]["patient_summary_zh"]
-    assert "附件《病理报告.pdf》正文：" in new["scenario"]["patient_summary_zh"]
-    assert "MVI negative" in new["scenario"]["patient_summary_zh"]
+    assert "另附资料文件（请直接读取附件，不要当论文）：病理报告.pdf" in new["scenario"]["patient_summary_zh"]
+    assert "MVI 阴性" in new["scenario"]["patient_summary_zh"]
+    assert new["provenance"]["attachments"] == ["病理报告.pdf"], new["provenance"]
+    assert (Path(win.workspace) / "files" / "病理报告.pdf").is_file(), "附件应落盘到工作区"
     assert not win.supplement_files, "新一轮报告应清空上一轮附件"
     given = new["scenario"]["inputs_given"]
     assert "报告后补充：" in ("、".join(given) if isinstance(given, list) else given)
