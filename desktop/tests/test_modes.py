@@ -88,11 +88,38 @@ def case_stub_still_works_for_tests():
     return "选择/流程行随模式切换正常"
 
 
+def case_names_example_highlight():
+    """模式新名称、示例句、综合结论高亮。"""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    labels = [win.mode.itemText(i) for i in range(win.mode.count())]
+    assert labels == ["SciencePal HCC-Fit 多篇论文综合",
+                      "SciencePal HCC-Fit 单篇论文核查"], labels
+    assert win.scene_example.text().startswith(
+        "示例：58 岁男性，乙肝，HCC，刚做完切除，病理还没出来"), win.scene_example.text()
+    win._fill_scene_example()
+    assert win.scene_input.toPlainText() == (
+        "58 岁男性，乙肝，HCC，刚做完切除，病理还没出来，从今天开始，想看看三年总生存率")
+
+    win.summary.setMarkdown("人群**匹配**；时点不匹配；输入无法确认")
+    win._highlight_summary()
+    doc = win.summary.document()
+    assert doc.toPlainText() == "人群匹配；时点不匹配；输入无法确认", doc.toPlainText()
+    bad = doc.find("不匹配")
+    assert bad.charFormat().foreground().color().name() == "#c0392b", bad.charFormat().foreground().color().name()
+    ok = doc.find("匹配")
+    assert ok.charFormat().foreground().color().name() == "#1e8449", ok.charFormat().foreground().color().name()
+    win.close()
+    return "新名称/新示例/匹配绿-不匹配红"
+
+
 def main():
     check("界面只剩 2 种大脑", case_ui_modes)
     check("人工/模拟实现已删", case_no_manual_brain)
     check("已移除模式明确报错", case_removed_mode_rejected)
     check("stub 仅测试可用", case_stub_still_works_for_tests)
+    check("命名/示例/高亮", case_names_example_highlight)
     ok = sum(1 for r in RESULTS if r)
     print("\n%d/%d 通过" % (ok, len(RESULTS)))
     return 0 if ok == len(RESULTS) else 1

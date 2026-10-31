@@ -26,8 +26,8 @@ TIER = {
 STRENGTH = {"strong": "强", "moderate": "中", "weak": "弱", "insufficient": "不足"}
 MODE_LABEL = {
     "stub": "离线自检（非真实结论）",
-    "sciencepal": "SciencePal Agent",
-    "sciencepal_hcc": "SciencePal · HCC-Fit 单次报告",
+    "sciencepal": "SciencePal HCC-Fit 多篇论文综合",
+    "sciencepal_hcc": "SciencePal HCC-Fit 单篇论文核查",
 }
 
 

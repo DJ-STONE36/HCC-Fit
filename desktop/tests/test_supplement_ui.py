@@ -109,6 +109,8 @@ def main():
     assert "报告后补充：" in ("、".join(given) if isinstance(given, list) else given)
     assert win.report_switch.count() == 2
     assert not win.report_switch.isHidden()
+    assert [win.report_switch.itemText(i) for i in range(2)] == ["第 2 次报告", "第 1 次报告"]
+    assert win.report_switch.itemData(0).get("visit_id") == new["visit_id"]
     assert all(not edit.toPlainText() for _, edit in win.supplement_inputs)
 
     sups = list((_DATA / "supplements").glob("sup_*.json"))
@@ -138,6 +140,18 @@ def main():
     win.supplement_new_session.setChecked(False)
     assert win._supplement_plan()[0] is True
     win.clear_supplement_files()
+
+    # 历次报告：继续累积，标签按 第 N 次报告 递减
+    for i in range(2):
+        win._history_add({"visit_id": "fake-%d" % i, "created_at": "2026-10-31T18:00:00",
+                          "mode": "sciencepal"})
+    assert win.report_switch.count() == 4, win.report_switch.count()
+    assert [win.report_switch.itemText(i) for i in range(4)] == [
+        "第 4 次报告", "第 3 次报告", "第 2 次报告", "第 1 次报告"]
+    assert win.report_switch.currentIndex() == 0, "新增报告后应选中最新一份"
+    assert win.report_history[0]["visit_id"] == "fake-1"
+    assert win.previous_visit["visit_id"] == "fake-0"
+    assert win.report_history[-1]["visit_id"] == old["visit_id"]
 
     win.close()
     shutil.rmtree(_DATA, ignore_errors=True)

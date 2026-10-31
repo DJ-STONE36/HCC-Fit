@@ -7,7 +7,8 @@ from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QStandardPaths, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication
+from PySide6.QtGui import (QBrush, QColor, QFont, QGuiApplication,
+                           QTextCharFormat, QTextCursor)
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -26,8 +27,8 @@ from app.input_normalization import RuleExtractor
 from app.workers import ProbeWorker, RunWorker
 
 MODES = [
-    ("SciencePal Agent（五阶段）", "sciencepal"),
-    ("SciencePal · HCC-Fit 单次报告", "sciencepal_hcc"),
+    ("SciencePal HCC-Fit 多篇论文综合", "sciencepal"),
+    ("SciencePal HCC-Fit 单篇论文核查", "sciencepal_hcc"),
 ]
 TIMEPOINTS = [
     ("术前（切除/消融前）", "pre_surgery"),
@@ -43,7 +44,7 @@ STAGES_5 = [
     ("integrate", "S3 综合方案"),
     ("expected", "S4 期望数据"),
 ]
-STAGE_HCC = [("hcc", "HCC-Fit 单次核查")]
+STAGE_HCC = [("hcc", "HCC-Fit 单篇论文核查")]
 STATUS_TEXT = {"match": "匹配", "mismatch": "不匹配", "unknown": "无法确认"}
 TIER_TEXT = {"applicable": "可直接讨论", "conditional": "有条件可用",
              "undetermined": "需补数据 / 无法确认", "not_applicable": "不适用"}
@@ -104,7 +105,7 @@ class MainWindow(QMainWindow):
         self.input_session = None
         self.input_confirmed = False
         self.confirmed_scenario = None
-        self.previous_visit = None
+        self.report_history = []          # 本次窗口内的历次报告（最新在前）
         self._supplement_parent = None
         self._supplement_record = None
         self._setting_scene = False
@@ -164,7 +165,7 @@ class MainWindow(QMainWindow):
         sv.addWidget(QLabel("请描述患者情况和你想回答的问题（一段话即可）"))
         ex_row = QHBoxLayout()
         self.scene_example = QLabel(
-            "示例：58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，从今天开始，想看看三年总生存率；如果做模型核查，请说明是否 HCC、切除是否根治。")
+            "示例：58 岁男性，乙肝，HCC，刚做完切除，病理还没出来，从今天开始，想看看三年总生存率")
         self.scene_example.setWordWrap(True)
         self.scene_example.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.scene_example.setStyleSheet("color:#66727f;font-size:9pt;")
@@ -234,7 +235,7 @@ class MainWindow(QMainWindow):
         fv.addLayout(rh)
         self.split_papers = QCheckBox("多篇时逐篇发给 Agent（较慢）")
         self.split_papers.setToolTip(
-            "勾选后：五阶段模式对每篇论文单独做 S2 匹配；单次核查模式对每篇论文单独出报告，"
+            "勾选后：多篇论文综合模式对每篇论文单独做 S2 匹配；单篇论文核查模式对每篇论文单独出报告，"
             "结果合并到同一份 visit。不勾选则所有论文一起发给 Agent。")
         fv.addWidget(self.split_papers)
 
@@ -484,10 +485,10 @@ class MainWindow(QMainWindow):
         for w in (self.key, self.probe_btn):
             w.setEnabled(sp)
         if mode == "sciencepal_hcc":
-            self.badge.setText("SciencePal · HCC-Fit 报告")
+            self.badge.setText("HCC-Fit 单篇论文核查")
             self.badge.setStyleSheet("background:#12352a;color:#9fe3c4;padding:3px 10px;border-radius:10px;")
         elif mode == "sciencepal":
-            self.badge.setText("SciencePal Agent")
+            self.badge.setText("HCC-Fit 多篇论文综合")
             self.badge.setStyleSheet("background:#12352a;color:#9fe3c4;padding:3px 10px;border-radius:10px;")
         elif mode == "stub":
             self.badge.setText("离线自检（仅自动化测试）")
@@ -551,7 +552,7 @@ class MainWindow(QMainWindow):
     # ---------------- 单输入场景卡 ----------------
     def _fill_scene_example(self):
         self.scene_input.setPlainText(
-            "58 岁男性，乙肝，肝癌，刚做完切除，病理还没出来，从今天开始，想看看三年总生存率；如果做模型核查，请说明是否 HCC、切除是否根治。")
+            "58 岁男性，乙肝，HCC，刚做完切除，病理还没出来，从今天开始，想看看三年总生存率")
 
     def _on_scene_text_changed(self):
         if self._setting_scene:
@@ -633,7 +634,7 @@ class MainWindow(QMainWindow):
                                 key_msg + "\n\n请在上方“1 · 大脑 / SciencePal 连接”里填写或重新复制。")
             return
         if mode == "sciencepal_hcc" and not self.files and not scenario["paper_text"]:
-            QMessageBox.warning(self, "缺少论文", "HCC-Fit 单次核查需要上传 PDF 或粘贴正文。")
+            QMessageBox.warning(self, "缺少论文", "单篇论文核查需要上传 PDF 或粘贴正文。")
             return
 
         try:
@@ -655,8 +656,6 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.pdf_btn.setEnabled(False)
         self.json_btn.setEnabled(False)
-        self.previous_visit = None
-        self.report_switch.setVisible(False)
         self._supplement_parent = None
         self._supplement_record = None
         self.visit = None
@@ -690,17 +689,46 @@ class MainWindow(QMainWindow):
         self.thread.finished.connect(self._thread_finished)
         self.thread.start()
 
-    # ---------------- 报告后补充资料 ----------------
-    def _set_report_switch(self, current, previous=None):
+    # ---------------- 历次报告（就诊反馈） ----------------
+    MAX_REPORTS = 12
+
+    def _history_add(self, visit: dict):
+        """记一份报告到历史（最新在前），并刷新下拉框。"""
+        vid = visit.get("visit_id")
+        self.report_history = [v for v in self.report_history
+                               if v.get("visit_id") != vid]
+        self.report_history.insert(0, visit)
+        del self.report_history[self.MAX_REPORTS:]
+        self._refresh_report_switch(select_vid=vid)
+
+    @property
+    def previous_visit(self):
+        """上一份报告（兼容旧代码/测试）。"""
+        return self.report_history[1] if len(self.report_history) > 1 else None
+
+    def _refresh_report_switch(self, select_vid=None):
+        n = len(self.report_history)
+        keep = select_vid
+        if keep is None and self.report_switch.currentData():
+            keep = self.report_switch.currentData().get("visit_id")
         self.report_switch.blockSignals(True)
         self.report_switch.clear()
-        self.report_switch.addItem("本次报告", current)
-        if previous:
-            self.report_switch.addItem("上一次报告", previous)
-            self.report_switch.setVisible(True)
-        else:
-            self.report_switch.setVisible(False)
-        self.report_switch.setCurrentIndex(0)
+        for i, v in enumerate(self.report_history):
+            self.report_switch.addItem("第 %d 次报告" % (n - i), v)
+            tip = "%s\n%s\n%s" % (
+                v.get("visit_id") or "",
+                v.get("created_at") or "",
+                export.MODE_LABEL.get(v.get("mode") or "", v.get("mode") or ""))
+            self.report_switch.setItemData(self.report_switch.count() - 1, tip,
+                                           Qt.ItemDataRole.ToolTipRole)
+        target = 0
+        if keep:
+            for i, v in enumerate(self.report_history):
+                if v.get("visit_id") == keep:
+                    target = i
+                    break
+        self.report_switch.setCurrentIndex(target)
+        self.report_switch.setVisible(n > 1)
         self.report_switch.blockSignals(False)
 
     def _on_report_switch(self):
@@ -1023,30 +1051,26 @@ class MainWindow(QMainWindow):
 
     def _on_done(self, visit: dict):
         self.timer.stop()
-        parent = self._supplement_parent
         rec = self._supplement_record
-        if parent:
-            self.previous_visit = parent
-            if rec:
-                rec.applied = True
-                rec.new_visit_id = visit.get("visit_id")
-                try:
-                    supplement_store.save(rec)
-                except Exception:
-                    pass
-            self._set_report_switch(visit, parent)
-        else:
-            self.previous_visit = None
-            self.report_switch.setVisible(False)
+        if rec:
+            rec.applied = True
+            rec.new_visit_id = visit.get("visit_id")
+            try:
+                supplement_store.save(rec)
+            except Exception:
+                pass
         self._supplement_parent = None
         self._supplement_record = None
         self.visit = visit
+        self._history_add(visit)
         self.progress.setVisible(False)
         self.start_btn.setEnabled(True)
         self.pdf_btn.setEnabled(True)
         self.json_btn.setEnabled(True)
         elapsed = int(time.time() - self.run_started) if self.run_started else 0
-        self.statusBar().showMessage("完成 · 用时 %ds · %s" % (elapsed, visit.get("visit_id", "")))
+        self.statusBar().showMessage("完成 · 用时 %ds · %s · 已存为第 %d 次报告"
+                                     % (elapsed, visit.get("visit_id", ""),
+                                        len(self.report_history)))
         self._render(visit)
         self.runFinished.emit()
 
@@ -1120,6 +1144,7 @@ class MainWindow(QMainWindow):
         summary = str((v.get("integrated") or {}).get("summary_zh") or "")
         if summary.strip():
             self.summary.setMarkdown(summary)
+            self._highlight_summary()
         else:
             self.summary.setPlainText("")
 
@@ -1137,12 +1162,40 @@ class MainWindow(QMainWindow):
         mode = v.get("mode")
         self.badge.setText({
             "stub": "离线自检（非真实结论）",
-            "sciencepal": "SciencePal Agent",
-            "sciencepal_hcc": "SciencePal · HCC-Fit 报告",
+            "sciencepal": "HCC-Fit 多篇论文综合",
+            "sciencepal_hcc": "HCC-Fit 单篇论文核查",
         }.get(mode, mode or ""))
         if self.supplement_files:            # 新一轮报告：上一轮的附件不再沿用
             self.clear_supplement_files()
         self._render_supplement(v)
+
+    def _highlight_summary(self):
+        """综合结论里「匹配」绿色加粗、「不匹配」红色加粗（保留 Markdown 排版）。"""
+        doc = self.summary.document()
+        text = doc.toPlainText()
+        if not text:
+            return
+        fmt_ok = QTextCharFormat()
+        fmt_ok.setForeground(QColor("#1e8449"))
+        fmt_ok.setFontWeight(QFont.Weight.Bold)
+        fmt_bad = QTextCharFormat()
+        fmt_bad.setForeground(QColor("#c0392b"))
+        fmt_bad.setFontWeight(QFont.Weight.Bold)
+
+        spans = []
+        for term, fmt in (("不匹配", fmt_bad), ("匹配", fmt_ok)):
+            i = text.find(term)
+            while i >= 0:
+                if term == "匹配" and i > 0 and text[i - 1] == "不":
+                    i = text.find(term, i + len(term))      # “不匹配”已单独处理
+                    continue
+                spans.append((i, len(term), fmt))
+                i = text.find(term, i + len(term))
+        for start, length, fmt in spans:
+            cursor = QTextCursor(doc)
+            cursor.setPosition(start)
+            cursor.setPosition(start + length, QTextCursor.MoveMode.KeepAnchor)
+            cursor.mergeCharFormat(fmt)
 
     def _render_matrix(self, v: dict):
         papers = {p.get("paper_id"): p for p in (v.get("papers") or [])}

@@ -305,7 +305,7 @@ class HccPlanner:
     split_papers=True 且有多篇时：逐篇调用 Agent，再把 matched/papers/期望数据合并成一份 visit。
     """
 
-    LABEL = "HCC-Fit 单次核查"
+    LABEL = "HCC-Fit 单篇论文核查"
 
     def __init__(self, brain, workspace: str, scenario: dict, emit=None, files=None,
                  split_papers: bool = False, attachments=None):
@@ -338,7 +338,7 @@ class HccPlanner:
             visits = []
             for i, name in enumerate(self.files):
                 key = "hcc#%d" % i
-                label = "单次核查 · %d/%d %s" % (i + 1, len(self.files), name)
+                label = "单篇论文核查 · %d/%d %s" % (i + 1, len(self.files), name)
                 self.emit({"stage": key, "label": label, "status": "start"})
                 t_one = time.time()
                 try:
